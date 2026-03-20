@@ -1,0 +1,241 @@
+// Trust Scoring Platform - Database Schema
+// MongoDB Version
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER MODEL
+// ============================================
+
+enum UserRole {
+  CUSTOMER
+  SHOPKEEPER
+  ADMIN
+}
+
+model User {
+  id            String      @id @default(auto()) @map("_id") @db.ObjectId
+  email         String      @unique
+  phone         String?
+  name          String?
+  passwordHash  String?
+  role          UserRole    @default(CUSTOMER)
+  isVerified    Boolean     @default(false)
+  otpCode       String?
+  otpExpiresAt  DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  
+  // Relations
+  shop          Shop?
+  bills         Bill[]
+  reviews       Review[]
+  alerts        Alert[]
+}
+
+// ============================================
+// SHOP MODEL
+// ============================================
+
+enum ShopCategory {
+  GROCERY
+  RESTAURANT
+  PHARMACY
+  ELECTRONICS
+  CLOTHING
+  SERVICE
+  OTHER
+}
+
+model Shop {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  name            String
+  description     String?
+  category        ShopCategory  @default(OTHER)
+  address         String
+  city            String
+  pincode         String
+  phone           String
+  email           String?
+  registrationNo  String        @unique
+  gstNumber       String?
+  ownerId         String        @unique @db.ObjectId
+  isActive        Boolean       @default(true)
+  isVerified      Boolean       @default(false)
+  logoUrl         String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  owner           User          @relation(fields: [ownerId], references: [id])
+  bills           Bill[]
+  reviews         Review[]
+  trustScores     TrustScore[]
+  alerts          Alert[]
+}
+
+// ============================================
+// BILL / TRANSACTION MODEL
+// ============================================
+
+enum BillStatus {
+  PENDING         // Created by shopkeeper, waiting for customer
+  VERIFIED        // Customer verified the bill
+  REJECTED        // Customer rejected the bill
+  USED            // Review submitted
+}
+
+model Bill {
+  id                String      @id @default(auto()) @map("_id") @db.ObjectId
+  billNumber        String
+  shopId            String      @db.ObjectId
+  
+  // Customer info (can be registered user or walk-in customer)
+  customerId        String?     @db.ObjectId   // null for walk-in customers
+  customerName      String?                     // for walk-in customers
+  customerPhone     String?                     // for linking purchases
+  customerEmail     String?                     // for linking purchases
+  
+  // Bill details
+  billDate          DateTime
+  totalAmount       Float
+  items             String?     // JSON string of purchased items
+  
+  // Generated bill
+  generatedBillUrl  String?     // URL to generated bill image/PDF
+  
+  // Customer uploaded verification
+  imageUrl          String?     // Customer uploaded bill image
+  ocrData           String?     // OCR extracted data
+  
+  // Status tracking
+  status            BillStatus  @default(PENDING)
+  rejectionReason   String?
+  verifiedAt        DateTime?
+  isEdited          Boolean     @default(false)  // Track if shopkeeper edited
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relations
+  shop              Shop        @relation(fields: [shopId], references: [id])
+  customer          User?       @relation(fields: [customerId], references: [id])
+  review            Review?
+  
+  @@unique([billNumber, shopId])
+}
+
+// ============================================
+// REVIEW MODEL
+// ============================================
+
+enum SentimentLabel {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+model Review {
+  id                String          @id @default(auto()) @map("_id") @db.ObjectId
+  billId            String          @unique @db.ObjectId
+  shopId            String          @db.ObjectId
+  customerId        String?         @db.ObjectId  // Can be null for walk-in customers
+  reviewText        String
+  sentimentScore    Float           @default(0)
+  sentimentLabel    SentimentLabel  @default(NEUTRAL)
+  aspects           String?
+  isComplaint       Boolean         @default(false)
+  complaintStatus   String?
+  complaintResponse String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  bill              Bill            @relation(fields: [billId], references: [id])
+  shop              Shop            @relation(fields: [shopId], references: [id])
+  customer          User?           @relation(fields: [customerId], references: [id])
+}
+
+// ============================================
+// TRUST SCORE MODEL
+// ============================================
+
+model TrustScore {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId          String    @db.ObjectId
+  score           Float     @default(50)
+  totalReviews    Int       @default(0)
+  positiveCount   Int       @default(0)
+  neutralCount    Int       @default(0)
+  negativeCount   Int       @default(0)
+  weightedScore   Float     @default(50)
+  trend           String    @default("stable")
+  calculatedAt    DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relations
+  shop            Shop      @relation(fields: [shopId], references: [id])
+}
+
+// ============================================
+// ALERT MODEL
+// ============================================
+
+enum AlertType {
+  NEGATIVE_REVIEW
+  LOW_TRUST_SCORE
+  COMPLAINT_PENDING
+  WEEKLY_REPORT
+}
+
+enum AlertStatus {
+  PENDING
+  READ
+  RESOLVED
+}
+
+model Alert {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  shopId      String      @db.ObjectId
+  userId      String      @db.ObjectId
+  type        AlertType
+  title       String
+  message     String
+  reviewId    String?
+  status      AlertStatus @default(PENDING)
+  createdAt   DateTime    @default(now())
+  readAt      DateTime?
+  
+  // Relations
+  shop        Shop        @relation(fields: [shopId], references: [id])
+  user        User        @relation(fields: [userId], references: [id])
+}
+
+// ============================================
+// WEEKLY REPORT MODEL
+// ============================================
+
+model WeeklyReport {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  shopId          String    @db.ObjectId
+  weekStart       DateTime
+  weekEnd         DateTime
+  newReviews      Int       @default(0)
+  avgSentiment    Float     @default(0)
+  trustScoreStart Float
+  trustScoreEnd   Float
+  complaints      Int       @default(0)
+  resolved        Int       @default(0)
+  summary         String?
+  createdAt       DateTime  @default(now())
+  
+  @@unique([shopId, weekStart])
+}

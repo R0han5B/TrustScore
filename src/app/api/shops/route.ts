@@ -1,0 +1,182 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { getUserFromToken } from '@/lib/auth';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || '';
+    const category = searchParams.get('category') || '';
+    const city = searchParams.get('city') || '';
+    const limit = parseInt(searchParams.get('limit') || '20');
+    const offset = parseInt(searchParams.get('offset') || '0');
+
+    const where: Record<string, unknown> = {
+      isActive: true,
+    };
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search } },
+        { description: { contains: search } },
+        { address: { contains: search } },
+      ];
+    }
+
+    if (category) {
+      where.category = category;
+    }
+
+    if (city) {
+      where.city = { contains: city };
+    }
+
+    const [shops, total] = await Promise.all([
+      db.shop.findMany({
+        where,
+        include: {
+          trustScores: {
+            orderBy: { calculatedAt: 'desc' },
+            take: 1,
+          },
+          _count: {
+            select: { reviews: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      db.shop.count({ where }),
+    ]);
+
+    const shopsWithScore = shops.map((shop) => ({
+      ...shop,
+      trustScore: shop.trustScores[0]?.score || 50,
+      reviewCount: shop._count.reviews,
+      trustScores: undefined,
+      _count: undefined,
+    }));
+
+    return NextResponse.json({
+      success: true,
+      shops: shopsWithScore,
+      total,
+      limit,
+      offset,
+    });
+  } catch (error) {
+    console.error('Get shops error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to get shops' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const authHeader = request.headers.get('authorization');
+    const user = await getUserFromToken(authHeader);
+
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    if (user.role !== 'SHOPKEEPER') {
+      return NextResponse.json(
+        { success: false, error: 'Only shopkeepers can create shops' },
+        { status: 403 }
+      );
+    }
+
+    // Check if user already has a shop
+    const existingShop = await db.shop.findUnique({
+      where: { ownerId: user.id },
+    });
+
+    if (existingShop) {
+      return NextResponse.json(
+        { success: false, error: 'You already have a registered shop' },
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    const {
+      name,
+      description,
+      category,
+      address,
+      city,
+      pincode,
+      phone,
+      email,
+      registrationNo,
+      gstNumber,
+    } = body;
+
+    if (!name || !address || !city || !pincode || !registrationNo) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    // Check if registration number is unique
+    const existingReg = await db.shop.findUnique({
+      where: { registrationNo },
+    });
+
+    if (existingReg) {
+      return NextResponse.json(
+        { success: false, error: 'Registration number already registered' },
+        { status: 400 }
+      );
+    }
+
+    const shop = await db.shop.create({
+      data: {
+        name,
+        description,
+        category: category || 'OTHER',
+        address,
+        city,
+        pincode,
+        phone,
+        email,
+        registrationNo,
+        gstNumber,
+        ownerId: user.id,
+      },
+    });
+
+    // Create initial trust score
+    await db.trustScore.create({
+      data: {
+        shopId: shop.id,
+        score: 50,
+        weightedScore: 50,
+        totalReviews: 0,
+        positiveCount: 0,
+        neutralCount: 0,
+        negativeCount: 0,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: 'Shop created successfully',
+      shop,
+    });
+  } catch (error) {
+    console.error('Create shop error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to create shop' },
+      { status: 500 }
+    );
+  }
+}
