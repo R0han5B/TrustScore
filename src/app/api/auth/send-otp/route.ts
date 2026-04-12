@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createOrUpdateUserWithOTP } from '@/lib/auth';
+import { sendOtpEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,14 +26,13 @@ export async function POST(request: NextRequest) {
     // Create or update user with OTP
     const { user, otp } = await createOrUpdateUserWithOTP(email, phone, name);
 
-    // In production, send OTP via email/SMS
-    // For demo, return OTP in response (remove in production)
+    await sendOtpEmail(email, otp, name);
+
     console.log(`[OTP] Email: ${email}, OTP: ${otp}`);
 
     return NextResponse.json({
       success: true,
       message: 'OTP sent successfully',
-      // Remove otp in production - only for demo
       ...(process.env.NODE_ENV !== 'production' && { otp }),
       userId: user.id,
     });

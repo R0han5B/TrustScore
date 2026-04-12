@@ -62,6 +62,8 @@ model Shop {
   address         String
   city            String
   pincode         String
+  latitude        Float?
+  longitude       Float?
   phone           String
   email           String?
   registrationNo  String        @unique
@@ -147,6 +149,10 @@ model Review {
   billId            String          @unique @db.ObjectId
   shopId            String          @db.ObjectId
   customerId        String?         @db.ObjectId  // Can be null for walk-in customers
+  priceRating       Int             @default(5)
+  qualityRating     Int             @default(5)
+  behaviorRating    Int             @default(5)
+  serviceRating     Int             @default(5)
   reviewText        String
   sentimentScore    Float           @default(0)
   sentimentLabel    SentimentLabel  @default(NEUTRAL)

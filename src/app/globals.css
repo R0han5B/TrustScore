@@ -120,3 +120,97 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .hero-map-grid {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.95), transparent 88%);
+  }
+
+  .hero-map-route {
+    filter: blur(0.1px);
+    animation: hero-route-float 9s ease-in-out infinite;
+  }
+
+  .hero-route-two {
+    animation-delay: -2s;
+  }
+
+  .hero-route-three {
+    animation-delay: -4s;
+  }
+
+  .hero-map-pin {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    animation: hero-pin-bob 5.2s ease-in-out infinite;
+  }
+
+  .hero-pin-dot {
+    position: relative;
+    height: 0.95rem;
+    width: 0.95rem;
+    border-radius: 999px;
+    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.7);
+  }
+
+  .hero-pin-dot::after {
+    content: "";
+    position: absolute;
+    inset: -10px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, currentColor 22%, white);
+    opacity: 0.55;
+    animation: hero-pin-pulse 3.2s ease-out infinite;
+  }
+
+  .hero-pin-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 10rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.88);
+    padding: 0.55rem 0.95rem;
+    font-size: 0.8rem;
+    color: rgb(15 23 42);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(8px);
+  }
+
+  @keyframes hero-route-float {
+    0%, 100% {
+      transform: translate3d(0, 0, 0) rotate(0deg);
+      opacity: 0.55;
+    }
+    50% {
+      transform: translate3d(0, 12px, 0) rotate(1deg);
+      opacity: 0.9;
+    }
+  }
+
+  @keyframes hero-pin-bob {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+
+  @keyframes hero-pin-pulse {
+    0% {
+      transform: scale(0.72);
+      opacity: 0.7;
+    }
+    100% {
+      transform: scale(1.45);
+      opacity: 0;
+    }
+  }
+}

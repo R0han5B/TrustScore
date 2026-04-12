@@ -105,6 +105,11 @@ export const shopsAPI = {
       method: 'PUT',
       body: JSON.stringify(data),
     }, token),
+
+  delete: (id: string, token: string) =>
+    fetchAPI(`/shops/${id}`, {
+      method: 'DELETE',
+    }, token),
 };
 
 // Bills API
@@ -132,7 +137,7 @@ export const billsAPI = {
   verify: (billId: string, shopId: string, token: string) =>
     fetchAPI('/bills/verify', {
       method: 'POST',
-      body: JSON.stringify({ billId, shopId }),
+      body: JSON.stringify({ billId, shopId, verified: true }),
     }, token),
 
   getMy: (token: string) => fetchAPI('/bills/my', {}, token),
@@ -142,10 +147,20 @@ export const billsAPI = {
 
 // Reviews API
 export const reviewsAPI = {
-  submit: (billId: string, reviewText: string, token: string) =>
+  submit: (
+    billId: string,
+    reviewText: string,
+    ratings: {
+      priceRating: number;
+      qualityRating: number;
+      behaviorRating: number;
+      serviceRating: number;
+    },
+    token: string
+  ) =>
     fetchAPI('/reviews', {
       method: 'POST',
-      body: JSON.stringify({ billId, reviewText }),
+      body: JSON.stringify({ billId, reviewText, ...ratings }),
     }, token),
 
   getShopReviews: (shopId: string, params?: { sentiment?: string; limit?: number }) => {
@@ -185,6 +200,11 @@ export const alertsAPI = {
     fetchAPI(`/alerts/${id}/read`, {
       method: 'PUT',
     }, token),
+};
+
+// Reports API
+export const reportsAPI = {
+  getWeekly: (token: string) => fetchAPI('/reports/weekly', {}, token),
 };
 
 // Admin API

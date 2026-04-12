@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
-import Tesseract from 'tesseract.js';
+
+const OCR_SPACE_API_URL = 'https://api.ocr.space/parse/image';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,6 +19,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const imageFile = formData.get('image') as File;
     const shopId = formData.get('shopId') as string;
+    const ocrApiKey = process.env.OCR_SPACE_API_KEY;
 
     if (!imageFile) {
       return NextResponse.json(
@@ -36,16 +38,53 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Convert image to base64 data URI
+    if (!ocrApiKey) {
+      return NextResponse.json(
+        { success: false, error: 'OCR API key is missing. Set OCR_SPACE_API_KEY in .env.' },
+        { status: 500 }
+      );
+    }
+
+    // Convert image to base64 data URI for storage and OCR fallback parsing
     const arrayBuffer = await imageFile.arrayBuffer();
     const base64Image = Buffer.from(arrayBuffer).toString('base64');
     const dataUri = `data:${mimeType};base64,${base64Image}`;
 
-    // Run Tesseract OCR — extracts plain text from image (no API key needed)
-    const { data } = await Tesseract.recognize(dataUri, 'eng', {
-      logger: () => {}, // suppress progress logs
+    // Send image to OCR.space using multipart upload
+    const ocrFormData = new FormData();
+    ocrFormData.append('file', imageFile, imageFile.name || 'bill-image');
+    ocrFormData.append('language', 'eng');
+    ocrFormData.append('isOverlayRequired', 'false');
+    ocrFormData.append('isTable', 'true');
+    ocrFormData.append('OCREngine', '2');
+
+    const ocrResponse = await fetch(OCR_SPACE_API_URL, {
+      method: 'POST',
+      headers: {
+        apikey: ocrApiKey,
+      },
+      body: ocrFormData,
     });
-    const rawText = data.text || '';
+
+    const ocrResult = await ocrResponse.json();
+
+    if (!ocrResponse.ok || ocrResult.IsErroredOnProcessing) {
+      const errorMessage =
+        ocrResult?.ErrorMessage?.join?.(', ') ||
+        ocrResult?.ErrorMessage ||
+        ocrResult?.ErrorDetails ||
+        'OCR processing failed';
+
+      return NextResponse.json(
+        { success: false, error: errorMessage },
+        { status: 502 }
+      );
+    }
+
+    const rawText = (ocrResult.ParsedResults || [])
+      .map((result: { ParsedText?: string }) => result.ParsedText || '')
+      .join('\n')
+      .trim();
 
     // Parse structured fields from raw OCR text
     const ocrData = parseOcrText(rawText);
@@ -73,6 +112,44 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const resolvedShopId = matchedShop?.id || shopId || '';
+    const resolvedBillNumber = ocrData.billNumber || `BILL-${Date.now()}`;
+
+    if (!resolvedShopId) {
+      return NextResponse.json(
+        { success: false, error: 'Could not match this bill to a shop. Please select the shop manually.' },
+        { status: 400 }
+      );
+    }
+
+    const existingBill = await db.bill.findFirst({
+      where: {
+        billNumber: resolvedBillNumber,
+        shopId: resolvedShopId,
+      },
+    });
+
+    if (existingBill) {
+      return NextResponse.json({
+        success: true,
+        message: 'This bill was already uploaded earlier.',
+        duplicate: true,
+        bill: {
+          id: existingBill.id,
+          billNumber: existingBill.billNumber,
+          shopId: existingBill.shopId,
+          shopName: matchedShop?.name || ocrData.shopName,
+          billDate: existingBill.billDate,
+          totalAmount: existingBill.totalAmount,
+          status: existingBill.status,
+          ocrData: existingBill.ocrData ? JSON.parse(existingBill.ocrData) : ocrData,
+        },
+        matchedShop: matchedShop
+          ? { id: matchedShop.id, name: matchedShop.name }
+          : null,
+      });
+    }
+
     // Safely coerce totalAmount
     const totalAmount =
       typeof ocrData.totalAmount === 'number' && !isNaN(ocrData.totalAmount)
@@ -82,8 +159,8 @@ export async function POST(request: NextRequest) {
     // Create bill record in database
     const bill = await db.bill.create({
       data: {
-        billNumber: ocrData.billNumber || `BILL-${Date.now()}`,
-        shopId: matchedShop?.id || shopId || '',
+        billNumber: resolvedBillNumber,
+        shopId: resolvedShopId,
         customerId: user.id,
         billDate,
         totalAmount,
@@ -120,8 +197,8 @@ export async function POST(request: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
-// Parses structured fields from raw Tesseract OCR text using regex heuristics.
-// Tesseract returns plain text — never JSON — so we extract fields manually.
+// Parses structured fields from raw OCR text using regex heuristics.
+// OCR.space returns plain text, so we extract fields manually.
 // ---------------------------------------------------------------------------
 function parseOcrText(text: string): {
   billNumber?: string;

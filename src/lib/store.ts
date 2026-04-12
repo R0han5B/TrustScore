@@ -28,10 +28,16 @@ export interface Shop {
   trustScore: number;
   reviewCount: number;
   logoUrl?: string;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface Review {
   id: string;
+  priceRating?: number;
+  qualityRating?: number;
+  behaviorRating?: number;
+  serviceRating?: number;
   reviewText: string;
   sentimentScore: number;
   sentimentLabel: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';

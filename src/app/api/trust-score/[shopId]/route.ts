@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { calculateTrustScore } from '@/lib/ai-service';
+import { clamp, hybridReviewToTrustScore } from '@/lib/review-scoring';
 
 export async function GET(
   request: NextRequest,
@@ -96,7 +97,14 @@ export async function POST(
     // Get all reviews
     const reviews = await db.review.findMany({
       where: { shopId },
-      select: { sentimentScore: true, createdAt: true },
+      select: {
+        sentimentScore: true,
+        createdAt: true,
+        priceRating: true,
+        qualityRating: true,
+        behaviorRating: true,
+        serviceRating: true,
+      },
     });
 
     // Get current score
@@ -105,8 +113,13 @@ export async function POST(
       orderBy: { calculatedAt: 'desc' },
     });
 
-    // Calculate new score
-    const result = await calculateTrustScore(reviews, currentTS?.score || 50);
+    const currentScore = currentTS?.score || 50;
+    const averageCompositeScore =
+      reviews.length > 0
+        ? reviews.reduce((sum, review) => sum + hybridReviewToTrustScore(review), 0) / reviews.length
+        : currentScore;
+    const finalScore = clamp(averageCompositeScore * 0.8 + currentScore * 0.2, 0, 100);
+    const trend = finalScore - currentScore > 2 ? 'up' : finalScore - currentScore < -2 ? 'down' : 'stable';
 
     // Get breakdown
     const breakdown = {
@@ -119,13 +132,13 @@ export async function POST(
     const trustScore = await db.trustScore.create({
       data: {
         shopId,
-        score: result.score,
-        weightedScore: result.weighted_score,
+        score: finalScore,
+        weightedScore: finalScore,
         totalReviews: reviews.length,
         positiveCount: breakdown.positive,
         neutralCount: breakdown.neutral,
         negativeCount: breakdown.negative,
-        trend: result.trend,
+        trend,
       },
     });
 

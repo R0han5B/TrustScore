@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromToken } from '@/lib/auth';
+import { buildShopGeocodeQuery, geocodeAddress } from '@/lib/geocoding';
 
 export async function GET(
   request: NextRequest,
@@ -115,15 +116,32 @@ export async function PUT(
     }
 
     const body = await request.json();
+    const nextName = body.name ?? shop.name;
+    const nextAddress = body.address ?? shop.address;
+    const nextCity = body.city ?? shop.city;
+    const nextPincode = body.pincode ?? shop.pincode;
+
+    const geocodeResult = await geocodeAddress(
+      buildShopGeocodeQuery({
+        name: nextName,
+        address: nextAddress,
+        city: nextCity,
+        pincode: nextPincode,
+      }),
+      nextCity
+    );
+
     const updatedShop = await db.shop.update({
       where: { id },
       data: {
-        name: body.name,
+        name: nextName,
         description: body.description,
         category: body.category,
-        address: body.address,
-        city: body.city,
-        pincode: body.pincode,
+        address: nextAddress,
+        city: nextCity,
+        pincode: nextPincode,
+        latitude: geocodeResult.coordinates?.lat ?? null,
+        longitude: geocodeResult.coordinates?.lon ?? null,
         phone: body.phone,
         email: body.email,
         gstNumber: body.gstNumber,
@@ -140,6 +158,73 @@ export async function PUT(
     console.error('Update shop error:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to update shop' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const authHeader = request.headers.get('authorization');
+    const user = await getUserFromToken(authHeader);
+
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    const shop = await db.shop.findUnique({
+      where: { id },
+    });
+
+    if (!shop) {
+      return NextResponse.json(
+        { success: false, error: 'Shop not found' },
+        { status: 404 }
+      );
+    }
+
+    if (shop.ownerId !== user.id && user.role !== 'ADMIN') {
+      return NextResponse.json(
+        { success: false, error: 'You can only delete your own shop' },
+        { status: 403 }
+      );
+    }
+
+    await db.alert.deleteMany({
+      where: { shopId: id },
+    });
+
+    await db.trustScore.deleteMany({
+      where: { shopId: id },
+    });
+
+    await db.review.deleteMany({
+      where: { shopId: id },
+    });
+
+    await db.bill.deleteMany({
+      where: { shopId: id },
+    });
+
+    await db.shop.delete({
+      where: { id },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: 'Shop deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete shop error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to delete shop' },
       { status: 500 }
     );
   }

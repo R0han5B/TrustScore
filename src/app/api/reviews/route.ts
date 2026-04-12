@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { analyzeSentiment, calculateTrustScore } from '@/lib/ai-service';
+import { analyzeSentiment } from '@/lib/ai-service';
+import { calculateHybridReviewSentiment, clamp, hybridReviewToTrustScore } from '@/lib/review-scoring';
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,11 +17,26 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { billId, reviewText } = body;
+    const { billId, reviewText, priceRating, qualityRating, behaviorRating, serviceRating } = body;
 
     if (!billId || !reviewText || reviewText.trim().length < 10) {
       return NextResponse.json(
         { success: false, error: 'Bill ID and review text (min 10 characters) are required' },
+        { status: 400 }
+      );
+    }
+
+    const ratingEntries = [
+      ['price', priceRating],
+      ['quality', qualityRating],
+      ['behavior', behaviorRating],
+      ['service', serviceRating],
+    ] as const;
+
+    const invalidRating = ratingEntries.find(([, value]) => !Number.isInteger(value) || value < 1 || value > 10);
+    if (invalidRating) {
+      return NextResponse.json(
+        { success: false, error: 'All ratings must be whole numbers between 1 and 10' },
         { status: 400 }
       );
     }
@@ -72,9 +88,16 @@ export async function POST(request: NextRequest) {
 
     // Analyze sentiment using AI service
     const sentimentResult = await analyzeSentiment(reviewText);
+    const hybridSentiment = calculateHybridReviewSentiment({
+      priceRating,
+      qualityRating,
+      behaviorRating,
+      serviceRating,
+      textPolarity: sentimentResult.polarity,
+    });
 
-    // Determine if it's a complaint (negative sentiment)
-    const isComplaint = sentimentResult.sentiment_label === 'NEGATIVE';
+    // Determine if it's a complaint using the final hybrid review sentiment.
+    const isComplaint = hybridSentiment.hybridLabel === 'NEGATIVE';
 
     // Create review
     const review = await db.review.create({
@@ -82,9 +105,13 @@ export async function POST(request: NextRequest) {
         billId,
         shopId: bill.shopId,
         customerId: user.id,
+        priceRating,
+        qualityRating,
+        behaviorRating,
+        serviceRating,
         reviewText,
-        sentimentScore: sentimentResult.polarity,
-        sentimentLabel: sentimentResult.sentiment_label as 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE',
+        sentimentScore: hybridSentiment.hybridPolarity,
+        sentimentLabel: hybridSentiment.hybridLabel,
         aspects: JSON.stringify(sentimentResult.aspects),
         isComplaint,
         complaintStatus: isComplaint ? 'pending' : null,
@@ -102,7 +129,7 @@ export async function POST(request: NextRequest) {
 
     // Create alert for negative reviews
     if (isComplaint) {
-      await createNegativeReviewAlert(bill.shopId, review.id, sentimentResult.polarity);
+      await createNegativeReviewAlert(bill.shopId, review.id, hybridSentiment.hybridPolarity);
     }
 
     return NextResponse.json({
@@ -110,10 +137,19 @@ export async function POST(request: NextRequest) {
       message: 'Review submitted successfully',
       review: {
         id: review.id,
+        priceRating: review.priceRating,
+        qualityRating: review.qualityRating,
+        behaviorRating: review.behaviorRating,
+        serviceRating: review.serviceRating,
         sentimentScore: review.sentimentScore,
         sentimentLabel: review.sentimentLabel,
         isComplaint: review.isComplaint,
         aspects: sentimentResult.aspects,
+        textSentiment: {
+          polarity: sentimentResult.polarity,
+          label: sentimentResult.sentiment_label,
+          confidence: sentimentResult.confidence,
+        },
       },
     });
   } catch (error) {
@@ -131,6 +167,10 @@ async function updateTrustScore(shopId: string) {
     const reviews = await db.review.findMany({
       where: { shopId },
       select: {
+        priceRating: true,
+        qualityRating: true,
+        behaviorRating: true,
+        serviceRating: true,
         sentimentScore: true,
         createdAt: true,
       },
@@ -144,8 +184,22 @@ async function updateTrustScore(shopId: string) {
 
     const currentScore = currentTS?.score || 50;
 
-    // Calculate new trust score
-    const trustResult = await calculateTrustScore(reviews, currentScore);
+    if (!reviews.length) {
+      return;
+    }
+
+    const averageRatingsOutOfTen =
+      reviews.reduce((sum, review) => {
+        return sum + (review.priceRating + review.qualityRating + review.behaviorRating + review.serviceRating) / 4;
+      }, 0) / reviews.length;
+
+    const averageCompositeScore =
+      reviews.reduce((sum, review) => sum + hybridReviewToTrustScore(review), 0) / reviews.length;
+
+    // Let strong new ratings move the trust score upward more clearly instead of staying too sticky.
+    const finalScore = clamp(averageCompositeScore * 0.8 + currentScore * 0.2, 0, 100);
+    const scoreDelta = finalScore - currentScore;
+    const trend = scoreDelta > 2 ? 'up' : scoreDelta < -2 ? 'down' : 'stable';
 
     // Count by sentiment
     const breakdown = {
@@ -158,13 +212,13 @@ async function updateTrustScore(shopId: string) {
     await db.trustScore.create({
       data: {
         shopId,
-        score: trustResult.score,
-        weightedScore: trustResult.weighted_score,
+        score: finalScore,
+        weightedScore: finalScore,
         totalReviews: reviews.length,
         positiveCount: breakdown.positive,
         neutralCount: breakdown.neutral,
         negativeCount: breakdown.negative,
-        trend: trustResult.trend,
+        trend,
       },
     });
   } catch (error) {

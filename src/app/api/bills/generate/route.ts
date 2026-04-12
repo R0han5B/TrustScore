@@ -50,12 +50,12 @@ export async function POST(request: NextRequest) {
     // Try to find existing customer by phone or email
     let existingCustomer = null;
     if (customerPhone) {
-      existingCustomer = await db.user.findUnique({
+      existingCustomer = await db.user.findFirst({
         where: { phone: customerPhone },
       });
     }
     if (!existingCustomer && customerEmail) {
-      existingCustomer = await db.user.findUnique({
+      existingCustomer = await db.user.findFirst({
         where: { email: customerEmail },
       });
     }
@@ -76,6 +76,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const generatedBillUrl = `/api/bills/${bill.id}/pdf`;
+
+    await db.bill.update({
+      where: { id: bill.id },
+      data: { generatedBillUrl },
+    });
+
     return NextResponse.json({
       success: true,
       message: 'Bill generated successfully',
@@ -89,6 +96,7 @@ export async function POST(request: NextRequest) {
         totalAmount: bill.totalAmount,
         billDate: bill.billDate,
         status: bill.status,
+        generatedBillUrl,
         isExistingCustomer: !!existingCustomer,
       },
     });

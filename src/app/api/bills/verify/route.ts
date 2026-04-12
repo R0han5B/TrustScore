@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { billId, verified, editedItems, totalAmount } = body;
+    const { billId, shopId, verified, editedItems, totalAmount } = body;
 
     if (!billId) {
       return NextResponse.json(
@@ -55,10 +55,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if bill is already verified/used
-    if (bill.status === 'VERIFIED' || bill.status === 'USED') {
+    // If the bill was already verified earlier, treat this as a successful verify
+    // so duplicate OCR uploads do not block the customer flow.
+    if (bill.status === 'VERIFIED') {
+      return NextResponse.json({
+        success: true,
+        verified: true,
+        message: 'This bill was already verified. You can continue to the review step.',
+        bill: {
+          id: bill.id,
+          billNumber: bill.billNumber,
+          shopId: bill.shopId,
+          shopName: bill.shop.name,
+          items: bill.items ? JSON.parse(bill.items) : [],
+          totalAmount: bill.totalAmount,
+          status: bill.status,
+        },
+      });
+    }
+
+    if (bill.status === 'USED') {
       return NextResponse.json(
-        { success: false, error: 'This bill has already been verified' },
+        { success: false, error: 'A review has already been submitted for this bill' },
         { status: 400 }
       );
     }
@@ -70,6 +88,22 @@ export async function POST(request: NextRequest) {
         verifiedAt: new Date(),
         customerId: user.id, // Link to registered user
       };
+
+      // OCR-uploaded bills can be manually linked to the selected shop during verification.
+      if (shopId && typeof shopId === 'string' && shopId !== bill.shopId) {
+        const selectedShop = await db.shop.findUnique({
+          where: { id: shopId },
+        });
+
+        if (!selectedShop) {
+          return NextResponse.json(
+            { success: false, error: 'Selected shop was not found' },
+            { status: 400 }
+          );
+        }
+
+        updateData.shopId = shopId;
+      }
 
       // If customer edited items, update them
       if (editedItems && Array.isArray(editedItems)) {
@@ -94,7 +128,9 @@ export async function POST(request: NextRequest) {
           id: updatedBill.id,
           billNumber: updatedBill.billNumber,
           shopId: updatedBill.shopId,
-          shopName: bill.shop.name,
+          shopName: shopId && shopId !== bill.shopId
+            ? (await db.shop.findUnique({ where: { id: updatedBill.shopId }, select: { name: true } }))?.name || bill.shop.name
+            : bill.shop.name,
           items: updatedBill.items ? JSON.parse(updatedBill.items) : [],
           totalAmount: updatedBill.totalAmount,
           status: updatedBill.status,

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { registerUser, generateToken } from '@/lib/auth';
+import { completeVerifiedRegistration, generateToken } from '@/lib/auth';
 import { UserRole } from '@prisma/client';
 import { db } from '@/lib/db';
+import { buildShopGeocodeQuery, geocodeAddress } from '@/lib/geocoding';
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,14 +24,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if user already exists
+    // Check current user state for verified-signup flow
     const existingUser = await db.user.findUnique({
       where: { email },
     });
 
-    if (existingUser) {
+    if (existingUser?.passwordHash) {
       return NextResponse.json(
         { success: false, error: 'Email already registered' },
+        { status: 400 }
+      );
+    }
+
+    if (!existingUser || !existingUser.isVerified) {
+      return NextResponse.json(
+        { success: false, error: 'Please verify your email with OTP before registering' },
         { status: 400 }
       );
     }
@@ -46,11 +54,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Register user
-    const user = await registerUser(email, password, name, userRole, phone);
+    // Complete verified registration
+    const registration = await completeVerifiedRegistration(email, password, name, userRole, phone);
+
+    if (!registration.user) {
+      return NextResponse.json(
+        { success: false, error: registration.error || 'Failed to register user' },
+        { status: 400 }
+      );
+    }
+
+    const user = registration.user;
 
     // Create shop if shopkeeper
     if (userRole === 'SHOPKEEPER' && shopDetails) {
+      const geocodeResult = await geocodeAddress(
+        buildShopGeocodeQuery({
+          name: shopDetails.name,
+          address: shopDetails.address,
+          city: shopDetails.city,
+          pincode: shopDetails.pincode,
+        }),
+        shopDetails.city
+      );
+
       await db.shop.create({
         data: {
           name: shopDetails.name,
@@ -59,6 +86,8 @@ export async function POST(request: NextRequest) {
           address: shopDetails.address,
           city: shopDetails.city,
           pincode: shopDetails.pincode,
+          latitude: geocodeResult.coordinates?.lat ?? null,
+          longitude: geocodeResult.coordinates?.lon ?? null,
           phone: shopDetails.phone || phone,
           email: shopDetails.email || email,
           registrationNo: shopDetails.registrationNo,

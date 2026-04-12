@@ -199,6 +199,48 @@ export async function registerUser(
 }
 
 /**
+ * Complete signup for an email that has already passed OTP verification
+ */
+export async function completeVerifiedRegistration(
+  email: string,
+  password: string,
+  name: string,
+  role: UserRole = 'CUSTOMER',
+  phone?: string
+): Promise<{ user?: User; error?: string }> {
+  const existingUser = await db.user.findUnique({
+    where: { email },
+  });
+
+  if (!existingUser) {
+    return { error: 'Please verify your email with OTP before registering' };
+  }
+
+  if (!existingUser.isVerified) {
+    return { error: 'Please complete OTP verification before registering' };
+  }
+
+  if (existingUser.passwordHash) {
+    return { error: 'Email already registered' };
+  }
+
+  const hashedPassword = await hashPassword(password);
+
+  const user = await db.user.update({
+    where: { id: existingUser.id },
+    data: {
+      passwordHash: hashedPassword,
+      name,
+      role,
+      phone: phone || existingUser.phone || null,
+      isVerified: true,
+    },
+  });
+
+  return { user };
+}
+
+/**
  * Login with email and password
  */
 export async function loginWithEmailPassword(

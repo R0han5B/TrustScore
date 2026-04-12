@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { calculateHybridReviewSentiment } from '@/lib/review-scoring';
 
 export async function GET(
   request: NextRequest,
@@ -65,6 +66,20 @@ export async function GET(
       
       return {
         ...review,
+        sentimentScore: calculateHybridReviewSentiment({
+          priceRating: review.priceRating,
+          qualityRating: review.qualityRating,
+          behaviorRating: review.behaviorRating,
+          serviceRating: review.serviceRating,
+          textPolarity: review.sentimentScore,
+        }).hybridPolarity,
+        sentimentLabel: calculateHybridReviewSentiment({
+          priceRating: review.priceRating,
+          qualityRating: review.qualityRating,
+          behaviorRating: review.behaviorRating,
+          serviceRating: review.serviceRating,
+          textPolarity: review.sentimentScore,
+        }).hybridLabel,
         customer: {
           id: review.customer?.id || '',
           name: maskName(review.customer?.name || null),

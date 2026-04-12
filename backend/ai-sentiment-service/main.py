@@ -3,21 +3,30 @@ AI Sentiment Analysis Microservice
 Trust Scoring Platform - FastAPI Backend
 
 This service provides:
-1. Sentiment analysis using TextBlob/NLTK
-2. Aspect-based sentiment extraction
-3. Trust score calculation endpoints
+1. Transformer-based multilingual sentiment analysis
+2. Fine-tuned model integration with low-latency singleton loading
+3. TextBlob fallback safety
+4. Aspect-based sentiment extraction
+5. Trust score calculation endpoints
 """
 
+from __future__ import annotations
+
+import math
+import os
+import re
+import unicodedata
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence
+
+import nltk
+import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, List, Optional
 from textblob import TextBlob
-import nltk
-import re
-import math
-from datetime import datetime
-from collections import defaultdict
+from transformers import AutoModelForSequenceClassification, XLMRobertaTokenizer
 
 # Download required NLTK data
 try:
@@ -117,6 +126,141 @@ ASPECT_KEYWORDS = {
     ]
 }
 
+MODEL_BASE_NAME = "cardiffnlp/twitter-xlm-roberta-base-sentiment"
+MODEL_DIR = Path(
+    os.getenv(
+        "HF_MODEL_DIR",
+        str(Path(__file__).resolve().parent / "models" / "sentiment-xlm-roberta"),
+    )
+)
+LABEL_TO_ID = {"NEGATIVE": 0, "NEUTRAL": 1, "POSITIVE": 2}
+ID_TO_LABEL = {value: key for key, value in LABEL_TO_ID.items()}
+
+torch.set_num_threads(max(1, int(os.getenv("TORCH_NUM_THREADS", "1"))))
+torch.set_num_interop_threads(max(1, int(os.getenv("TORCH_INTEROP_THREADS", "1"))))
+
+
+def normalize_review_text(text: str) -> str:
+    """Light cleanup that keeps multilingual text intact."""
+    text = unicodedata.normalize("NFKC", text or "")
+    text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def textblob_sentiment(text: str) -> Dict[str, float | str]:
+    """Centralized TextBlob fallback used for resilience and aspect scoring."""
+    blob = TextBlob(text)
+    polarity = round(blob.sentiment.polarity, 4)
+    subjectivity = round(blob.sentiment.subjectivity, 4)
+    return {
+        "polarity": polarity,
+        "subjectivity": subjectivity,
+        "sentiment_label": get_sentiment_label(polarity),
+        "confidence": round(get_confidence(polarity, subjectivity), 4),
+    }
+
+
+class SentimentInferenceEngine:
+    """Singleton transformer inference engine loaded once at startup."""
+
+    def __init__(self) -> None:
+        self.tokenizer = None
+        self.model = None
+        self.device = torch.device("cpu")
+        self.model_source = "textblob-fallback"
+        self.ready = False
+        self.last_error: Optional[str] = None
+
+    def load(self) -> None:
+        """Load fine-tuned model first, then fall back to base model."""
+        model_path: str | Path = MODEL_DIR if MODEL_DIR.exists() else MODEL_BASE_NAME
+
+        try:
+            self.tokenizer = XLMRobertaTokenizer.from_pretrained(model_path)
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
+            self.model.to(self.device)
+            self.model.eval()
+            self.ready = True
+            self.model_source = str(model_path)
+            self.last_error = None
+        except Exception as exc:
+            self.ready = False
+            self.model = None
+            self.tokenizer = None
+            self.model_source = "textblob-fallback"
+            self.last_error = str(exc)
+
+    def _resolve_label(self, predicted_index: int) -> str:
+        if self.model is not None and getattr(self.model.config, "id2label", None):
+            label = self.model.config.id2label.get(predicted_index, ID_TO_LABEL.get(predicted_index, "NEUTRAL"))
+            label_upper = str(label).upper()
+            if "POS" in label_upper:
+                return "POSITIVE"
+            if "NEG" in label_upper:
+                return "NEGATIVE"
+            if "NEU" in label_upper:
+                return "NEUTRAL"
+        return ID_TO_LABEL.get(predicted_index, "NEUTRAL")
+
+    def _probabilities_to_scores(
+        self,
+        label: str,
+        probabilities: Sequence[float],
+    ) -> Dict[str, float | str]:
+        negative_probability, neutral_probability, positive_probability = probabilities
+        confidence = round(float(max(probabilities)), 4)
+
+        if label == "POSITIVE":
+            polarity = round(0.7 + 0.3 * positive_probability, 4)
+        elif label == "NEGATIVE":
+            polarity = round(-(0.7 + 0.3 * negative_probability), 4)
+        else:
+            polarity = round((positive_probability - negative_probability) * 0.2, 4)
+
+        subjectivity = round(min(1.0, 0.25 + confidence * 0.75), 4)
+
+        return {
+            "polarity": max(-1.0, min(1.0, polarity)),
+            "subjectivity": subjectivity,
+            "sentiment_label": label,
+            "confidence": confidence,
+        }
+
+    def predict_batch(self, texts: Sequence[str]) -> List[Dict[str, float | str]]:
+        cleaned_texts = [normalize_review_text(text) for text in texts]
+
+        if not self.ready or self.tokenizer is None or self.model is None:
+            return [textblob_sentiment(text) for text in cleaned_texts]
+
+        try:
+            encoded = self.tokenizer(
+                list(cleaned_texts),
+                padding=True,
+                truncation=True,
+                max_length=256,
+                return_tensors="pt",
+            )
+            encoded = {key: value.to(self.device) for key, value in encoded.items()}
+
+            with torch.no_grad():
+                logits = self.model(**encoded).logits
+                probabilities = torch.softmax(logits, dim=-1).cpu().tolist()
+
+            results: List[Dict[str, float | str]] = []
+            for row in probabilities:
+                predicted_index = int(max(range(len(row)), key=lambda idx: row[idx]))
+                label = self._resolve_label(predicted_index)
+                results.append(self._probabilities_to_scores(label, row))
+            return results
+        except Exception as exc:
+            self.ready = False
+            self.last_error = str(exc)
+            return [textblob_sentiment(text) for text in cleaned_texts]
+
+
+INFERENCE_ENGINE = SentimentInferenceEngine()
+
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
@@ -138,7 +282,7 @@ def get_confidence(polarity: float, subjectivity: float) -> float:
 
 def extract_aspects(text: str) -> Dict[str, float]:
     """Extract aspect-based sentiment scores"""
-    text_lower = text.lower()
+    text_lower = normalize_review_text(text).lower()
     aspects = {}
     
     for aspect, keywords in ASPECT_KEYWORDS.items():
@@ -155,12 +299,11 @@ def extract_aspects(text: str) -> Dict[str, float]:
         if aspect_sentences:
             # Calculate sentiment for aspect-specific sentences
             combined_text = ' '.join(aspect_sentences)
-            blob = TextBlob(combined_text)
-            aspects[aspect] = round(blob.sentiment.polarity, 3)
+            aspects[aspect] = round(TextBlob(combined_text).sentiment.polarity, 3)
     
     # If no aspects found, return overall sentiment for all aspects
     if not aspects:
-        overall = TextBlob(text).sentiment.polarity
+        overall = TextBlob(text_lower).sentiment.polarity
         for aspect in ASPECT_KEYWORDS.keys():
             aspects[aspect] = round(overall, 3)
     
@@ -194,8 +337,16 @@ async def health_check():
         "status": "healthy",
         "nltk_ready": True,
         "textblob_ready": True,
+        "transformer_ready": INFERENCE_ENGINE.ready,
+        "model_source": INFERENCE_ENGINE.model_source,
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Load inference resources once when the service starts."""
+    INFERENCE_ENGINE.load()
 
 @app.post("/api/analyze", response_model=SentimentResponse)
 async def analyze_sentiment(request: ReviewRequest):
@@ -210,21 +361,16 @@ async def analyze_sentiment(request: ReviewRequest):
     - Aspect-based sentiment scores
     """
     try:
-        text = request.review_text.strip()
+        text = normalize_review_text(request.review_text)
         
         if not text:
             raise HTTPException(status_code=400, detail="Review text cannot be empty")
         
-        # Analyze using TextBlob
-        blob = TextBlob(text)
-        polarity = round(blob.sentiment.polarity, 4)
-        subjectivity = round(blob.sentiment.subjectivity, 4)
-        
-        # Get sentiment label
-        sentiment_label = get_sentiment_label(polarity)
-        
-        # Calculate confidence
-        confidence = round(get_confidence(polarity, subjectivity), 4)
+        sentiment_result = INFERENCE_ENGINE.predict_batch([text])[0]
+        polarity = float(sentiment_result["polarity"])
+        subjectivity = float(sentiment_result["subjectivity"])
+        sentiment_label = str(sentiment_result["sentiment_label"])
+        confidence = float(sentiment_result["confidence"])
         
         # Extract aspect-based sentiment
         aspects = extract_aspects(text)
@@ -244,19 +390,24 @@ async def analyze_sentiment(request: ReviewRequest):
 async def analyze_batch(request: BatchReviewRequest):
     """Analyze sentiment for multiple reviews"""
     results = []
-    
+
+    valid_reviews = []
+    valid_texts = []
     for review in request.reviews:
-        text = review.get("review_text", review.get("text", ""))
+        text = normalize_review_text(review.get("review_text", review.get("text", "")))
         if text:
-            blob = TextBlob(text)
-            polarity = round(blob.sentiment.polarity, 4)
-            
-            results.append({
-                "review_id": review.get("id"),
-                "polarity": polarity,
-                "sentiment_label": get_sentiment_label(polarity),
-                "aspects": extract_aspects(text)
-            })
+            valid_reviews.append(review)
+            valid_texts.append(text)
+
+    sentiment_results = INFERENCE_ENGINE.predict_batch(valid_texts) if valid_texts else []
+
+    for review, text, sentiment_result in zip(valid_reviews, valid_texts, sentiment_results):
+        results.append({
+            "review_id": review.get("id"),
+            "polarity": round(float(sentiment_result["polarity"]), 4),
+            "sentiment_label": str(sentiment_result["sentiment_label"]),
+            "aspects": extract_aspects(text)
+        })
     
     return {"results": results, "count": len(results)}
 
@@ -451,4 +602,4 @@ async def get_aspects():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

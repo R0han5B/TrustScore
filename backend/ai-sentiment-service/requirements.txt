@@ -1,0 +1,16 @@
+fastapi>=0.115.0,<1.0.0
+uvicorn>=0.30.0,<1.0.0
+pydantic>=2.10.0,<3.0.0
+textblob==0.17.1
+nltk==3.8.1
+httpx==0.26.0
+python-multipart==0.0.6
+torch>=2.2.0
+transformers>=4.39.0
+datasets>=2.18.0
+scikit-learn>=1.4.0
+numpy>=1.26.0
+pymongo>=4.6.1
+python-dotenv>=1.0.1
+sentencepiece>=0.2.0
+protobuf>=5.28.0

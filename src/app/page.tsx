@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useStore, User, Shop, Review, Bill } from '@/lib/store';
-import { authAPI, shopsAPI, billsAPI, reviewsAPI, trustScoreAPI, alertsAPI, adminAPI } from '@/lib/api';
+import { authAPI, shopsAPI, billsAPI, reviewsAPI, trustScoreAPI, alertsAPI, adminAPI, reportsAPI } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,6 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { ShopDiscoveryMap } from '@/components/shop-discovery-map';
 import {
   Search,
   Upload,
@@ -59,6 +60,10 @@ import {
   Menu,
   Home,
   BadgeCheck,
+  Download,
+  Navigation,
+  LocateFixed,
+  Route,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -254,8 +259,11 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<'CUSTOMER' | 'SHOPKEEPER'>('CUSTOMER');
   const [otp, setOtp] = useState('');
+  const [otpPurpose, setOtpPurpose] = useState<'login' | 'register'>('login');
+  const [verifiedRegisterEmail, setVerifiedRegisterEmail] = useState<string | null>(null);
   const [shopDetails, setShopDetails] = useState({
     name: '',
+    description: '',
     address: '',
     city: '',
     pincode: '',
@@ -263,14 +271,16 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
     registrationNo: '',
     category: 'OTHER',
   });
+  const isRegisterOtpVerified = !!email && verifiedRegisterEmail === email;
 
-  const handleSendOTP = async () => {
+  const handleSendOTP = async (purpose: 'login' | 'register' = 'login') => {
     if (!email) {
       toast.error('Please enter your email');
       return;
     }
     setIsLoading(true);
     try {
+      setOtpPurpose(purpose);
       const res = await authAPI.sendOTP(email, phone, name);
       if (res.success) {
         toast.success('OTP sent to your email');
@@ -292,8 +302,15 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
     try {
       const res = await authAPI.verifyOTP(email, otp);
       if (res.success) {
-        onAuth(res.user, res.token);
-        toast.success('Login successful!');
+        if (otpPurpose === 'register') {
+          setVerifiedRegisterEmail(email);
+          setOtp('');
+          setMode('register');
+          toast.success('Email verified. You can complete registration now.');
+        } else {
+          onAuth(res.user, res.token);
+          toast.success('Login successful!');
+        }
       }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Invalid OTP');
@@ -305,6 +322,10 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
   const handleRegister = async () => {
     if (!email || !password || !name) {
       toast.error('Please fill all required fields');
+      return;
+    }
+    if (!isRegisterOtpVerified) {
+      toast.error('Please verify your email with OTP before registering');
       return;
     }
     setIsLoading(true);
@@ -353,9 +374,12 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
     setName('');
     setPhone('');
     setOtp('');
+    setOtpPurpose('login');
+    setVerifiedRegisterEmail(null);
     setRole('CUSTOMER');
     setShopDetails({
       name: '',
+      description: '',
       address: '',
       city: '',
       pincode: '',
@@ -365,6 +389,41 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
     });
     setMode('login');
   };
+
+  const renderOtpVerification = () => (
+    <>
+      <Alert>
+        <Mail className="h-4 w-4" />
+        <AlertTitle>Check your email</AlertTitle>
+        <AlertDescription>
+          We&apos;ve sent a 6-digit OTP to {email}
+        </AlertDescription>
+      </Alert>
+      <div className="space-y-2">
+        <Label htmlFor="otp">Enter OTP</Label>
+        <Input
+          id="otp"
+          type="text"
+          placeholder="000000"
+          maxLength={6}
+          value={otp}
+          onChange={(e) => setOtp(e.target.value)}
+          className="text-center text-2xl tracking-widest"
+        />
+      </div>
+      <Button
+        className="w-full bg-gradient-to-r from-slate-800 to-black"
+        onClick={handleVerifyOTP}
+        disabled={isLoading}
+      >
+        {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+        {otpPurpose === 'register' ? 'Verify Email' : 'Verify & Login'}
+      </Button>
+      <Button variant="ghost" className="w-full" onClick={() => setMode(otpPurpose === 'register' ? 'register' : 'login')}>
+        <ArrowLeft className="w-4 h-4 mr-2" /> Back to {otpPurpose === 'register' ? 'Register' : 'Login'}
+      </Button>
+    </>
+  );
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) { resetForm(); onClose(); } }}>
@@ -379,46 +438,15 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={mode === 'otp' ? 'login' : mode} onValueChange={(v) => setMode(v as typeof mode)} className="w-full">
+        <Tabs value={mode === 'otp' ? (otpPurpose === 'register' ? 'register' : 'login') : mode} onValueChange={(v) => setMode(v as typeof mode)} className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-4">
             <TabsTrigger value="login">Login</TabsTrigger>
             <TabsTrigger value="register">Register</TabsTrigger>
           </TabsList>
 
           <TabsContent value="login" className="space-y-4">
-            {mode === 'otp' ? (
-              <>
-                <Alert>
-                  <Mail className="h-4 w-4" />
-                  <AlertTitle>Check your email</AlertTitle>
-                  <AlertDescription>
-                    We&apos;ve sent a 6-digit OTP to {email}
-                  </AlertDescription>
-                </Alert>
-                <div className="space-y-2">
-                  <Label htmlFor="otp">Enter OTP</Label>
-                  <Input
-                    id="otp"
-                    type="text"
-                    placeholder="000000"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value)}
-                    className="text-center text-2xl tracking-widest"
-                  />
-                </div>
-                <Button
-                  className="w-full bg-gradient-to-r from-slate-800 to-black"
-                  onClick={handleVerifyOTP}
-                  disabled={isLoading}
-                >
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  Verify & Login
-                </Button>
-                <Button variant="ghost" className="w-full" onClick={() => setMode('login')}>
-                  <ArrowLeft className="w-4 h-4 mr-2" /> Back to Login
-                </Button>
-              </>
+            {mode === 'otp' && otpPurpose === 'login' ? (
+              renderOtpVerification()
             ) : (
               <>
                 <div className="space-y-2">
@@ -466,9 +494,9 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                     />
-                    <Button variant="outline" onClick={handleSendOTP} disabled={isLoading}>
+                <Button variant="outline" onClick={handleSendOTP} disabled={isLoading}>
                       Send OTP
-                    </Button>
+                </Button>
                   </div>
                 </div>
               </>
@@ -476,151 +504,194 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
           </TabsContent>
 
           <TabsContent value="register" className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  placeholder="John Doe"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone</Label>
-                <Input
-                  id="phone"
-                  placeholder="+91..."
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="reg-email">Email</Label>
-              <Input
-                id="reg-email"
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="reg-password">Password</Label>
-              <Input
-                id="reg-password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>I am a</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as typeof role)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CUSTOMER">Customer</SelectItem>
-                  <SelectItem value="SHOPKEEPER">Shopkeeper</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {role === 'SHOPKEEPER' && (
-              <div className="space-y-3 p-3 border rounded-lg bg-slate-50 dark:bg-slate-800">
-                <h4 className="font-medium flex items-center gap-2 text-sm">
-                  <Store className="w-4 h-4" /> Shop Details
-                </h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Shop Name</Label>
+            {mode === 'otp' && otpPurpose === 'register' ? (
+              renderOtpVerification()
+            ) : (
+              <>
+                <Alert className={isRegisterOtpVerified ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-sky-200 bg-sky-50'}>
+                  <Mail className="h-4 w-4" />
+                  <AlertTitle>{isRegisterOtpVerified ? 'Email verified' : 'OTP verification required'}</AlertTitle>
+                  <AlertDescription>
+                    {isRegisterOtpVerified
+                      ? `Your email ${email} has been verified. You can complete signup now.`
+                      : 'Verify your email with OTP before registration can be completed.'}
+                  </AlertDescription>
+                </Alert>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Full Name</Label>
                     <Input
-                      placeholder="My Shop"
-                      value={shopDetails.name}
-                      onChange={(e) => setShopDetails({ ...shopDetails, name: e.target.value })}
-                      className="h-9"
+                      id="name"
+                      placeholder="John Doe"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
                     />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Category</Label>
-                    <Select
-                      value={shopDetails.category}
-                      onValueChange={(v) => setShopDetails({ ...shopDetails, category: v })}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="GROCERY">Grocery</SelectItem>
-                        <SelectItem value="RESTAURANT">Restaurant</SelectItem>
-                        <SelectItem value="PHARMACY">Pharmacy</SelectItem>
-                        <SelectItem value="ELECTRONICS">Electronics</SelectItem>
-                        <SelectItem value="CLOTHING">Clothing</SelectItem>
-                        <SelectItem value="SERVICE">Service</SelectItem>
-                        <SelectItem value="OTHER">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <Label className="text-xs">Address</Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone</Label>
                     <Input
-                      placeholder="123 Main St"
-                      value={shopDetails.address}
-                      onChange={(e) => setShopDetails({ ...shopDetails, address: e.target.value })}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">City</Label>
-                    <Input
-                      placeholder="Mumbai"
-                      value={shopDetails.city}
-                      onChange={(e) => setShopDetails({ ...shopDetails, city: e.target.value })}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Pincode</Label>
-                    <Input
-                      placeholder="400001"
-                      value={shopDetails.pincode}
-                      onChange={(e) => setShopDetails({ ...shopDetails, pincode: e.target.value })}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Shop Phone</Label>
-                    <Input
+                      id="phone"
                       placeholder="+91..."
-                      value={shopDetails.phone}
-                      onChange={(e) => setShopDetails({ ...shopDetails, phone: e.target.value })}
-                      className="h-9"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Registration No.</Label>
-                    <Input
-                      placeholder="REG123456"
-                      value={shopDetails.registrationNo}
-                      onChange={(e) => setShopDetails({ ...shopDetails, registrationNo: e.target.value })}
-                      className="h-9"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
                     />
                   </div>
                 </div>
-              </div>
-            )}
+                <div className="space-y-2">
+                  <Label htmlFor="reg-email">Email</Label>
+                  <Input
+                    id="reg-email"
+                    type="email"
+                    placeholder="your@email.com"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                    }}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={isRegisterOtpVerified ? 'secondary' : 'outline'}
+                    onClick={() => handleSendOTP('register')}
+                    disabled={isLoading}
+                    className="flex-1"
+                  >
+                    <Mail className="mr-2 h-4 w-4" />
+                    {isRegisterOtpVerified ? 'Resend OTP' : 'Verify Email with OTP'}
+                  </Button>
+                  {isRegisterOtpVerified ? (
+                    <Badge className="self-center bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                      Verified
+                    </Badge>
+                  ) : null}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="reg-password">Password</Label>
+                  <Input
+                    id="reg-password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>I am a</Label>
+                  <Select value={role} onValueChange={(v) => setRole(v as typeof role)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CUSTOMER">Customer</SelectItem>
+                      <SelectItem value="SHOPKEEPER">Shopkeeper</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <Button
-              className="w-full bg-gradient-to-r from-slate-800 to-black"
-              onClick={handleRegister}
-              disabled={isLoading}
-            >
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Register
-            </Button>
+                {role === 'SHOPKEEPER' && (
+                  <div className="space-y-3 p-3 border rounded-lg bg-slate-50 dark:bg-slate-800">
+                    <h4 className="font-medium flex items-center gap-2 text-sm">
+                      <Store className="w-4 h-4" /> Shop Details
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Shop Name</Label>
+                        <Input
+                          placeholder="My Shop"
+                          value={shopDetails.name}
+                          onChange={(e) => setShopDetails({ ...shopDetails, name: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Category</Label>
+                        <Select
+                          value={shopDetails.category}
+                          onValueChange={(v) => setShopDetails({ ...shopDetails, category: v })}
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="GROCERY">Grocery</SelectItem>
+                            <SelectItem value="RESTAURANT">Restaurant</SelectItem>
+                            <SelectItem value="PHARMACY">Pharmacy</SelectItem>
+                            <SelectItem value="ELECTRONICS">Electronics</SelectItem>
+                            <SelectItem value="CLOTHING">Clothing</SelectItem>
+                            <SelectItem value="SERVICE">Service</SelectItem>
+                            <SelectItem value="OTHER">Other</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <Label className="text-xs">Description</Label>
+                        <Textarea
+                          placeholder="Tell customers what your shop is known for..."
+                          value={shopDetails.description}
+                          onChange={(e) => setShopDetails({ ...shopDetails, description: e.target.value })}
+                          className="min-h-[84px] resize-none bg-white"
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <Label className="text-xs">Address</Label>
+                        <Input
+                          placeholder="123 Main St"
+                          value={shopDetails.address}
+                          onChange={(e) => setShopDetails({ ...shopDetails, address: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">City</Label>
+                        <Input
+                          placeholder="Mumbai"
+                          value={shopDetails.city}
+                          onChange={(e) => setShopDetails({ ...shopDetails, city: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Pincode</Label>
+                        <Input
+                          placeholder="400001"
+                          value={shopDetails.pincode}
+                          onChange={(e) => setShopDetails({ ...shopDetails, pincode: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Shop Phone</Label>
+                        <Input
+                          placeholder="+91..."
+                          value={shopDetails.phone}
+                          onChange={(e) => setShopDetails({ ...shopDetails, phone: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Registration No.</Label>
+                        <Input
+                          placeholder="REG123456"
+                          value={shopDetails.registrationNo}
+                          onChange={(e) => setShopDetails({ ...shopDetails, registrationNo: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <Button
+                  className="w-full bg-gradient-to-r from-slate-800 to-black"
+                  onClick={handleRegister}
+                  disabled={isLoading || !isRegisterOtpVerified}
+                >
+                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                  {isRegisterOtpVerified ? 'Register' : 'Verify Email First'}
+                </Button>
+              </>
+            )}
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -638,6 +709,9 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [homepageMapShop, setHomepageMapShop] = useState<Shop | null>(null);
+  const [homepageDistances, setHomepageDistances] = useState<Record<string, number>>({});
+  const [homepageLocateSignal, setHomepageLocateSignal] = useState(0);
 
   // Fetch shops
   useEffect(() => {
@@ -671,6 +745,38 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
     });
   }, [shops, searchQuery, categoryFilter]);
 
+  const homepageExploreShops = useMemo(() => {
+    return [...filteredShops]
+      .sort((a, b) => {
+        const distanceA = homepageDistances[a.id];
+        const distanceB = homepageDistances[b.id];
+
+        if (typeof distanceA === 'number' && typeof distanceB === 'number') {
+          return distanceA - distanceB;
+        }
+
+        if (typeof distanceA === 'number') return -1;
+        if (typeof distanceB === 'number') return 1;
+
+        return b.trustScore - a.trustScore;
+      })
+      .slice(0, 6);
+  }, [filteredShops, homepageDistances]);
+
+  useEffect(() => {
+    if (!homepageExploreShops.length) {
+      setHomepageMapShop(null);
+      return;
+    }
+
+    setHomepageMapShop((current) => {
+      if (current && homepageExploreShops.some((shop) => shop.id === current.id)) {
+        return current;
+      }
+      return homepageExploreShops[0];
+    });
+  }, [homepageExploreShops]);
+
   if (selectedShop) {
     return (
       <ShopDetailView
@@ -684,46 +790,222 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
   return (
     <div className="space-y-6">
       {/* Hero Section */}
-      <div className="text-center py-8 md:py-12">
-        <h1 className="text-3xl md:text-4xl font-bold mb-3 bg-gradient-to-r from-slate-800 to-black bg-clip-text text-transparent">
-          Find Trusted Local Shops
-        </h1>
-        <p className="text-slate-600 dark:text-slate-400 max-w-2xl mx-auto text-sm md:text-base">
-          Discover verified reviews and trust scores for local shops. Make informed decisions before you buy.
-        </p>
-      </div>
+      <section className="relative overflow-hidden rounded-[2rem] border border-slate-200/70 bg-gradient-to-br from-slate-50 via-white to-sky-50 shadow-xl">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_38%),radial-gradient(circle_at_80%_20%,_rgba(14,165,233,0.12),_transparent_30%),linear-gradient(135deg,_rgba(255,255,255,0.88),_rgba(241,245,249,0.65))]" />
+        <div className="hero-map-grid absolute inset-x-0 top-0 h-72 opacity-70" />
+        <div className="hero-map-route hero-route-one absolute left-[8%] top-14 h-36 w-48 rounded-full border-2 border-dashed border-sky-300/70" />
+        <div className="hero-map-route hero-route-two absolute right-[10%] top-10 h-44 w-56 rounded-full border-2 border-dashed border-blue-200/70" />
+        <div className="hero-map-route hero-route-three absolute left-1/2 top-24 h-28 w-72 -translate-x-1/2 rounded-full border-2 border-dashed border-cyan-200/70" />
 
-      {/* Search Section */}
-      <Card className="border-0 shadow-lg bg-white dark:bg-slate-900">
-        <CardContent className="pt-6">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <Input
-                placeholder="Search shops by name or city..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-12 h-12 text-lg border-2 focus:border-slate-800"
-              />
-            </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full md:w-48 h-12 border-2">
-                <SelectValue placeholder="All Categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="GROCERY">🛒 Grocery</SelectItem>
-                <SelectItem value="RESTAURANT">🍽️ Restaurant</SelectItem>
-                <SelectItem value="PHARMACY">💊 Pharmacy</SelectItem>
-                <SelectItem value="ELECTRONICS">📱 Electronics</SelectItem>
-                <SelectItem value="CLOTHING">👕 Clothing</SelectItem>
-                <SelectItem value="SERVICE">🔧 Service</SelectItem>
-                <SelectItem value="OTHER">📦 Other</SelectItem>
-              </SelectContent>
-            </Select>
+        <div className="hero-map-pin hidden md:flex absolute left-[14%] top-24">
+          <div className="hero-pin-dot bg-slate-900" />
+          <div className="hero-pin-card">
+            <span className="font-semibold">Singh Fashion Hub</span>
+            <span className="text-xs text-slate-500">Jaipur</span>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+        <div className="hero-map-pin hidden md:flex absolute right-[16%] top-20">
+          <div className="hero-pin-dot bg-blue-500" />
+          <div className="hero-pin-card">
+            <span className="font-semibold">Reddy Electronics</span>
+            <span className="text-xs text-slate-500">Hyderabad</span>
+          </div>
+        </div>
+        <div className="hero-map-pin hidden md:flex absolute bottom-28 left-1/2 -translate-x-1/2">
+          <div className="hero-pin-dot bg-amber-500" />
+          <div className="hero-pin-card">
+            <span className="font-semibold">Kumar Medical Store</span>
+            <span className="text-xs text-slate-500">Bangalore</span>
+          </div>
+        </div>
+
+        <div className="relative px-5 pb-10 pt-28 md:px-8 md:py-14 lg:px-12 lg:py-16">
+          <div className="mx-auto max-w-3xl text-center">
+            <Badge className="mb-4 rounded-full bg-white/90 px-4 py-1 text-slate-700 shadow-sm backdrop-blur">
+              Live trust discovery for local shops
+            </Badge>
+            <h1 className="mx-auto max-w-xl text-3xl font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl md:max-w-2xl md:text-5xl">
+              Find Trusted Local Shops
+            </h1>
+            <p className="mx-auto mt-4 max-w-xl text-base leading-8 text-slate-600 md:mt-5 md:max-w-2xl">
+              Discover verified reviews, trust scores, and nearby local businesses with a map-first browsing experience built for real customers.
+            </p>
+          </div>
+
+          <Card className="relative mx-auto mt-8 max-w-5xl border border-white/80 bg-white/90 shadow-2xl backdrop-blur md:mt-10">
+            <CardContent className="pt-6">
+              <div className="flex flex-col gap-4 md:flex-row">
+                <div className="relative flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <Input
+                    placeholder="Search shops by name or city..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="h-12 border-2 border-slate-200 bg-white pl-12 text-lg shadow-sm focus:border-slate-800"
+                  />
+                </div>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="h-12 w-full border-2 border-slate-200 bg-white md:w-52">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="GROCERY">🛒 Grocery</SelectItem>
+                    <SelectItem value="RESTAURANT">🍽️ Restaurant</SelectItem>
+                    <SelectItem value="PHARMACY">💊 Pharmacy</SelectItem>
+                    <SelectItem value="ELECTRONICS">📱 Electronics</SelectItem>
+                    <SelectItem value="CLOTHING">👕 Clothing</SelectItem>
+                    <SelectItem value="SERVICE">🔧 Service</SelectItem>
+                    <SelectItem value="OTHER">📦 Other</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-12 border-2 border-slate-200 bg-white md:w-auto"
+                  onClick={() => setHomepageLocateSignal((value) => value + 1)}
+                >
+                  <LocateFixed className="mr-2 h-4 w-4" />
+                  Near Me
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
+        <div className="space-y-4">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-600">Explore nearby</p>
+              <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Map-first local discovery</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                Browse trusted shops around you, inspect markers on the map, and jump into Google Maps when you are ready to visit.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="hidden border-slate-300 bg-white text-slate-700 sm:inline-flex"
+              onClick={() => setHomepageLocateSignal((value) => value + 1)}
+            >
+              <LocateFixed className="mr-2 h-4 w-4" />
+              Find Nearby
+            </Button>
+          </div>
+
+          <ShopDiscoveryMap
+            shops={homepageExploreShops}
+            selectedShopId={homepageMapShop?.id ?? null}
+            onSelectShop={(shop) => setHomepageMapShop(shop)}
+            onDistancesChange={setHomepageDistances}
+            locateSignal={homepageLocateSignal}
+            title="Explore trusted shops on the map"
+            subtitle="Free Leaflet map with OpenStreetMap tiles. Directions open in Google Maps."
+            mapHeightClassName="h-[280px] md:h-[360px] xl:h-[430px]"
+          />
+        </div>
+
+        <div className="space-y-4 xl:max-h-[640px] xl:overflow-y-auto xl:pr-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">Suggested stops</p>
+              <h3 className="mt-1 text-xl font-semibold text-slate-900">Shops worth exploring</h3>
+            </div>
+            <Badge className="bg-slate-900 text-white hover:bg-slate-900">
+              {homepageExploreShops.length} results
+            </Badge>
+          </div>
+
+          <div className="grid gap-4">
+            {homepageExploreShops.map((shop) => {
+              const distance = homepageDistances[shop.id];
+              const isActive = homepageMapShop?.id === shop.id;
+
+              return (
+                <Card
+                  key={shop.id}
+                  className={`border transition-all duration-200 ${
+                    isActive
+                      ? 'border-sky-300 bg-sky-50/80 shadow-lg shadow-sky-100'
+                      : 'border-slate-200 bg-white/90 shadow-sm'
+                  }`}
+                >
+                  <CardContent className="p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 text-sm font-bold text-white shadow-md">
+                            {shop.name[0]}
+                          </div>
+                          <div>
+                            <h4 className="text-lg font-semibold text-slate-900">{shop.name}</h4>
+                            <p className="flex items-center gap-1 text-sm text-slate-500">
+                              <MapPin className="h-3.5 w-3.5" />
+                              {shop.city}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary">{shop.category}</Badge>
+                          <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                            Trust {Math.round(shop.trustScore)}
+                          </Badge>
+                          <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">
+                            {shop.reviewCount} reviews
+                          </Badge>
+                          {typeof distance === 'number' ? (
+                            <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">
+                              {distance.toFixed(1)} km away
+                            </Badge>
+                          ) : null}
+                        </div>
+
+                        <p className="text-sm leading-6 text-slate-600 line-clamp-2">
+                          {shop.description || `${shop.address}, ${shop.city}`}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          variant={isActive ? 'default' : 'outline'}
+                          className={isActive ? 'bg-slate-900 text-white hover:bg-slate-800' : ''}
+                          onClick={() => setHomepageMapShop(shop)}
+                        >
+                          <MapPin className="mr-2 h-4 w-4" />
+                          Show on Map
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="text-slate-700"
+                          onClick={() => setSelectedShop(shop)}
+                        >
+                          View Shop
+                          <ChevronRight className="ml-2 h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+
+            {!homepageExploreShops.length && !isLoading ? (
+              <Card className="border border-dashed border-slate-300 bg-white/70">
+                <CardContent className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                  <MapPin className="h-8 w-8 text-slate-400" />
+                  <div>
+                    <h4 className="text-base font-semibold text-slate-900">No shops found for this filter</h4>
+                    <p className="mt-1 text-sm text-slate-500">Try another city, category, or use Near Me to explore nearby shops.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+        </div>
+      </section>
 
       {/* Stats Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -870,18 +1152,25 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
   const [shops, setShops] = useState<Shop[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
+  const [highlightedShopId, setHighlightedShopId] = useState<string | null>(null);
   const [userBills, setUserBills] = useState<Bill[]>([]);
   const [userReviews, setUserReviews] = useState<Review[]>([]);
   const [pendingBills, setPendingBills] = useState<PendingBill[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [editReviewText, setEditReviewText] = useState('');
+  const [userCoordinates, setUserCoordinates] = useState<{ lat: number; lon: number } | null>(null);
+  const [distanceByShop, setDistanceByShop] = useState<Record<string, number>>({});
 
   // Fetch shops
   useEffect(() => {
     const fetchShops = async () => {
       try {
-        const res = await shopsAPI.getAll({ search: searchQuery, limit: 50 });
+        const normalizedQuery = searchQuery.trim().toLowerCase();
+        const res = await shopsAPI.getAll({
+          search: normalizedQuery === 'near me' ? undefined : searchQuery,
+          limit: 50,
+        });
         if (res.success) {
           setShops(res.shops);
         }
@@ -1002,13 +1291,55 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
   };
 
   const filteredShops = useMemo(() => {
-    if (!searchQuery) return shops;
-    return shops.filter(
-      (shop) =>
-        shop.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        shop.city.toLowerCase().includes(searchQuery.toLowerCase())
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const base = !normalizedQuery || normalizedQuery === 'near me'
+      ? shops
+      : shops.filter(
+          (shop) =>
+            shop.name.toLowerCase().includes(normalizedQuery) ||
+            shop.city.toLowerCase().includes(normalizedQuery)
+        );
+
+    const withDistance = base.map((shop) => ({
+      ...shop,
+      distanceKm: distanceByShop[shop.id] ?? null,
+    }));
+
+    if (userCoordinates || normalizedQuery === 'near me') {
+      return [...withDistance].sort((a, b) => {
+        const aDistance = a.distanceKm ?? Number.POSITIVE_INFINITY;
+        const bDistance = b.distanceKm ?? Number.POSITIVE_INFINITY;
+        return aDistance - bDistance;
+      });
+    }
+
+    return withDistance;
+  }, [distanceByShop, searchQuery, shops, userCoordinates]);
+
+  const handleUseCurrentLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported in this browser');
+      return;
+    }
+
+    setIsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserCoordinates({
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+        });
+        setSearchQuery('near me');
+        toast.success('Showing nearby shops');
+        setIsLoading(false);
+      },
+      () => {
+        toast.error('Could not access your location');
+        setIsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, [shops, searchQuery]);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -1090,6 +1421,10 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
                     className="pl-12 h-12 border-2"
                   />
                 </div>
+                <Button variant="outline" className="h-12 px-5" onClick={handleUseCurrentLocation} disabled={isLoading}>
+                  <LocateFixed className="mr-2 h-4 w-4" />
+                  Near Me
+                </Button>
               </div>
 
               {/* Quick Actions */}
@@ -1110,7 +1445,7 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
                 </Card>
               </div>
 
-              {/* Shops Grid */}
+              {/* Map + Shops */}
               {filteredShops.length === 0 ? (
                 <div className="text-center py-12">
                   <Store className="w-12 h-12 mx-auto text-slate-300 mb-4" />
@@ -1118,41 +1453,70 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
                   <p className="text-slate-400">Try adjusting your search</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredShops.map((shop) => (
-                    <Card
-                      key={shop.id}
-                      className="cursor-pointer hover:shadow-lg transition-shadow border-0 shadow-md"
-                      onClick={() => setSelectedShop(shop)}
-                    >
-                      <CardHeader className="pb-2">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center text-white font-bold">
-                              {shop.name[0]}
+                <div className="grid gap-6 lg:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.25fr)] lg:items-start">
+                  <div className="lg:sticky lg:top-24">
+                    <ShopDiscoveryMap
+                      shops={filteredShops}
+                      selectedShopId={highlightedShopId || filteredShops[0]?.id || null}
+                      onSelectShop={(shop) => setHighlightedShopId(shop.id)}
+                      onUserLocationChange={setUserCoordinates}
+                      onDistancesChange={setDistanceByShop}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    {filteredShops.map((shop) => {
+                      const isHighlighted = (highlightedShopId || filteredShops[0]?.id) === shop.id;
+
+                      return (
+                        <Card
+                          key={shop.id}
+                          className={`border-0 shadow-md transition-all duration-200 ${isHighlighted ? 'ring-2 ring-slate-900 shadow-lg' : 'hover:shadow-lg'}`}
+                          onClick={() => setHighlightedShopId(shop.id)}
+                        >
+                          <CardHeader className="pb-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center text-white font-bold">
+                                  {shop.name[0]}
+                                </div>
+                                <div>
+                                  <CardTitle className="text-lg">{shop.name}</CardTitle>
+                                  <CardDescription className="flex items-center gap-1">
+                                    <MapPin className="w-3 h-3" />
+                                    {shop.city}
+                                  </CardDescription>
+                                </div>
+                              </div>
+                              <Badge variant="secondary">{shop.category}</Badge>
                             </div>
-                            <div>
-                              <CardTitle className="text-lg">{shop.name}</CardTitle>
-                              <CardDescription className="flex items-center gap-1">
-                                <MapPin className="w-3 h-3" />
-                                {shop.city}
-                              </CardDescription>
+                          </CardHeader>
+                          <CardContent className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <TrustScoreGauge score={shop.trustScore} size="sm" />
+                                <span className="text-sm text-slate-500">{shop.reviewCount} reviews</span>
+                              </div>
+                              {typeof shop.distanceKm === 'number' ? (
+                                <Badge variant="outline">{shop.distanceKm.toFixed(1)} km</Badge>
+                              ) : (
+                                <ChevronRight className="w-5 h-5 text-slate-400" />
+                              )}
                             </div>
-                          </div>
-                          <Badge variant="secondary">{shop.category}</Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <TrustScoreGauge score={shop.trustScore} size="sm" />
-                            <span className="text-sm text-slate-500">{shop.reviewCount} reviews</span>
-                          </div>
-                          <ChevronRight className="w-5 h-5 text-slate-400" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                            <div className="flex gap-2">
+                              <Button variant="outline" className="flex-1" onClick={() => setHighlightedShopId(shop.id)}>
+                                <MapPin className="mr-2 h-4 w-4" />
+                                Show on Map
+                              </Button>
+                              <Button className="flex-1 bg-gradient-to-r from-slate-800 to-black" onClick={() => setSelectedShop(shop)}>
+                                <Navigation className="mr-2 h-4 w-4" />
+                                View Shop
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -1387,7 +1751,24 @@ function BillUploadFlow({
   const [ocrData, setOcrData] = useState<Record<string, unknown>>({});
   const [selectedShopId, setSelectedShopId] = useState<string>('');
   const [reviewText, setReviewText] = useState('');
+  const [reviewRatings, setReviewRatings] = useState({
+    priceRating: 5,
+    qualityRating: 5,
+    behaviorRating: 5,
+    serviceRating: 5,
+  });
   const [isLoading, setIsLoading] = useState(false);
+
+  const updateReviewRating = (
+    field: 'priceRating' | 'qualityRating' | 'behaviorRating' | 'serviceRating',
+    value: string
+  ) => {
+    const numeric = Number(value);
+    setReviewRatings((current) => ({
+      ...current,
+      [field]: Number.isFinite(numeric) ? numeric : 5,
+    }));
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1408,7 +1789,8 @@ function BillUploadFlow({
       const res = await billsAPI.upload(selectedFile, selectedShopId || null, token);
       if (res.success) {
         setUploadedBill(res.bill);
-        setOcrData(res.ocrData || {});
+        setOcrData(res.bill?.ocrData || {});
+        setSelectedShopId(res.matchedShop?.id || res.bill?.shopId || selectedShopId || '');
         setStep('verify');
         toast.success('Bill uploaded! Please verify the details.');
       }
@@ -1451,7 +1833,7 @@ function BillUploadFlow({
     }
     setIsLoading(true);
     try {
-      const res = await reviewsAPI.submit(uploadedBill.id, reviewText, token);
+      const res = await reviewsAPI.submit(uploadedBill.id, reviewText, reviewRatings, token);
       if (res.success) {
         toast.success('Review submitted successfully!');
         onUploadSuccess(uploadedBill);
@@ -1462,6 +1844,12 @@ function BillUploadFlow({
         setOcrData({});
         setSelectedShopId('');
         setReviewText('');
+        setReviewRatings({
+          priceRating: 5,
+          qualityRating: 5,
+          behaviorRating: 5,
+          serviceRating: 5,
+        });
       }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Failed to submit review');
@@ -1478,6 +1866,12 @@ function BillUploadFlow({
     setOcrData({});
     setSelectedShopId('');
     setReviewText('');
+    setReviewRatings({
+      priceRating: 5,
+      qualityRating: 5,
+      behaviorRating: 5,
+      serviceRating: 5,
+    });
   };
 
   return (
@@ -1618,8 +2012,35 @@ function BillUploadFlow({
               <Alert className="border-slate-300 bg-slate-100">
                 <CheckCircle className="h-4 w-4 text-slate-700" />
                 <AlertTitle className="text-slate-800">Bill Verified!</AlertTitle>
-                <AlertDescription className="text-slate-600">You can now submit your review. Our AI will analyze the sentiment.</AlertDescription>
+                <AlertDescription className="text-slate-600">You can now rate this shop and submit your review. We&apos;ll combine your ratings with AI sentiment analysis from the text.</AlertDescription>
               </Alert>
+
+              <div className="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
+                {[
+                  ['priceRating', 'Price'],
+                  ['qualityRating', 'Quality'],
+                  ['behaviorRating', 'Behaviour'],
+                  ['serviceRating', 'Service'],
+                ].map(([field, label]) => (
+                  <div key={field} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>{label}</Label>
+                      <span className="text-sm font-semibold text-slate-700">
+                        {reviewRatings[field as keyof typeof reviewRatings]}/10
+                      </span>
+                    </div>
+                    <Input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={reviewRatings[field as keyof typeof reviewRatings]}
+                      onChange={(e) => updateReviewRating(field as keyof typeof reviewRatings, e.target.value)}
+                      className="h-3 cursor-pointer border-0 bg-transparent px-0 shadow-none"
+                    />
+                  </div>
+                ))}
+              </div>
 
               <div className="space-y-2">
                 <Label>Your Review *</Label>
@@ -1639,8 +2060,8 @@ function BillUploadFlow({
                 </h4>
                 <ul className="text-sm text-slate-600 space-y-1">
                   <li>• AI will analyze your review sentiment</li>
-                  <li>• Aspects like price, quality, service will be scored</li>
-                  <li>• Shop&apos;s trust score will be updated</li>
+                  <li>• Your 10-point ratings for price, quality, behaviour, and service will be stored</li>
+                  <li>• Shop&apos;s trust score will be recalculated from both ratings and sentiment</li>
                   <li>• Your review helps other customers!</li>
                 </ul>
               </div>
@@ -1680,6 +2101,7 @@ interface GeneratedBill {
   totalAmount: number;
   billDate: Date;
   status: string;
+  generatedBillUrl?: string;
   isExistingCustomer: boolean;
 }
 
@@ -1695,6 +2117,22 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
   } | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [complaints, setComplaints] = useState<Review[]>([]);
+  const [weeklyReport, setWeeklyReport] = useState<{
+    weekStart: string;
+    weekEnd: string;
+    newReviews: number;
+    avgSentiment: number;
+    trustScoreStart: number;
+    trustScoreEnd: number;
+    complaints: number;
+    resolved: number;
+    summary: string;
+    strengths: string[];
+    improvements: string[];
+    metrics: Record<string, number>;
+    previousMetrics: Record<string, number>;
+    breakdown: Record<string, number>;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   
@@ -1711,6 +2149,14 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
   } | null>(null);
   const [showBillPreview, setShowBillPreview] = useState(false);
   const [lastGeneratedBill, setLastGeneratedBill] = useState<GeneratedBill | null>(null);
+  const [isEditShopOpen, setIsEditShopOpen] = useState(false);
+  const [shopForm, setShopForm] = useState({
+    name: '',
+    description: '',
+    address: '',
+    city: '',
+    pincode: '',
+  });
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1718,6 +2164,13 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
         const shopRes = await shopsAPI.getMy(token);
         if (shopRes.success) {
           setShop(shopRes.shop);
+          setShopForm({
+            name: shopRes.shop.name || '',
+            description: shopRes.shop.description || '',
+            address: shopRes.shop.address || '',
+            city: shopRes.shop.city || '',
+            pincode: shopRes.shop.pincode || '',
+          });
           setTrustScoreData({
             score: shopRes.shop.trustScore,
             totalReviews: shopRes.shop.trustScoreData?.totalReviews || 0,
@@ -1731,6 +2184,11 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
           if (reviewsRes.success) {
             setReviews(reviewsRes.reviews);
             setComplaints(reviewsRes.reviews.filter((r: Review) => r.isComplaint && r.complaintStatus === 'pending'));
+          }
+
+          const weeklyReportRes = await reportsAPI.getWeekly(token);
+          if (weeklyReportRes.success) {
+            setWeeklyReport(weeklyReportRes.report);
           }
         }
 
@@ -1799,6 +2257,36 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
     return billItems.reduce((sum, item) => sum + item.quantity * item.price, 0);
   };
 
+  const handleDownloadBillPdf = async (bill: GeneratedBill) => {
+    if (!bill.generatedBillUrl) {
+      toast.error('PDF is not available for this bill yet');
+      return;
+    }
+
+    try {
+      const response = await fetch(bill.generatedBillUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to download bill PDF');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${bill.billNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to download bill PDF');
+    }
+  };
+
   const handleGenerateBill = async () => {
     if (!customerName && !customerPhone && !customerEmail) {
       toast.error('Please enter customer name, phone, or email');
@@ -1859,6 +2347,68 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
     }
   };
 
+  const handleUpdateShop = async () => {
+    if (!shop) return;
+    if (!shopForm.name || !shopForm.address || !shopForm.city || !shopForm.pincode) {
+      toast.error('Please fill all required shop fields');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await shopsAPI.update(
+        shop.id,
+        {
+          name: shopForm.name,
+          description: shopForm.description,
+          address: shopForm.address,
+          city: shopForm.city,
+          pincode: shopForm.pincode,
+          category: shop.category,
+          phone: shop.phone,
+          email: (shop as Shop & { email?: string }).email,
+          gstNumber: (shop as Shop & { gstNumber?: string }).gstNumber,
+        },
+        token
+      );
+
+      if (res.success) {
+        setShop((current) => (current ? { ...current, ...res.shop } : res.shop));
+        setIsEditShopOpen(false);
+        toast.success('Shop updated successfully');
+      }
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update shop');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteShop = async () => {
+    if (!shop) return;
+    if (!confirm('Are you sure you want to remove your shop from the database? This will also remove related bills, reviews, alerts, and trust score data.')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await shopsAPI.delete(shop.id, token);
+      if (res.success) {
+        setShop(null);
+        setReviews([]);
+        setComplaints([]);
+        setGeneratedBills([]);
+        setTrustScoreData(null);
+        setIsEditShopOpen(false);
+        toast.success('Shop removed successfully');
+      }
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete shop');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -1891,6 +2441,9 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
               </div>
               <div>
                 <h1 className="text-2xl font-bold">{shop.name}</h1>
+                {shop.description ? (
+                  <p className="mt-1 text-white/80">{shop.description}</p>
+                ) : null}
                 <p className="text-white/80 flex items-center gap-2">
                   <MapPin className="w-4 h-4" /> {shop.address}, {shop.city}
                 </p>
@@ -1904,6 +2457,90 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
               {trustScoreData?.trend === 'down' && (
                 <Badge className="bg-red-400 text-red-900"><TrendingDown className="w-3 h-3 mr-1" /> Declining</Badge>
               )}
+              <Dialog open={isEditShopOpen} onOpenChange={setIsEditShopOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="secondary" className="bg-white text-slate-800 hover:bg-white/90">
+                    <Settings className="mr-2 h-4 w-4" />
+                    Manage Shop
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle>Edit Shop Details</DialogTitle>
+                    <DialogDescription>
+                      Update your shop name, description, and location details. Coordinates will be refreshed automatically in the backend.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-shop-name">Shop Name</Label>
+                      <Input
+                        id="edit-shop-name"
+                        value={shopForm.name}
+                        onChange={(e) => setShopForm((current) => ({ ...current, name: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-shop-description">Description</Label>
+                      <Textarea
+                        id="edit-shop-description"
+                        value={shopForm.description}
+                        onChange={(e) => setShopForm((current) => ({ ...current, description: e.target.value }))}
+                        className="min-h-[100px] resize-none"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-shop-address">Address</Label>
+                      <Input
+                        id="edit-shop-address"
+                        value={shopForm.address}
+                        onChange={(e) => setShopForm((current) => ({ ...current, address: e.target.value }))}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-shop-city">City</Label>
+                        <Input
+                          id="edit-shop-city"
+                          value={shopForm.city}
+                          onChange={(e) => setShopForm((current) => ({ ...current, city: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-shop-pincode">Pincode</Label>
+                        <Input
+                          id="edit-shop-pincode"
+                          value={shopForm.pincode}
+                          onChange={(e) => setShopForm((current) => ({ ...current, pincode: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-between">
+                      <Button
+                        variant="destructive"
+                        onClick={handleDeleteShop}
+                        disabled={isLoading}
+                      >
+                        <XCircle className="mr-2 h-4 w-4" />
+                        Remove Shop
+                      </Button>
+                      <div className="flex gap-2">
+                        <DialogClose asChild>
+                          <Button variant="outline">Cancel</Button>
+                        </DialogClose>
+                        <Button
+                          className="bg-gradient-to-r from-slate-800 to-black"
+                          onClick={handleUpdateShop}
+                          disabled={isLoading}
+                        >
+                          {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                          Save Changes
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
         </CardContent>
@@ -2182,6 +2819,17 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
                           <p className="text-xs text-slate-400 mt-1">
                             {new Date(bill.billDate).toLocaleString()}
                           </p>
+                          <div className="mt-3">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownloadBillPdf(bill)}
+                              disabled={!bill.generatedBillUrl}
+                            >
+                              <Download className="w-4 h-4 mr-2" />
+                              Download PDF
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -2241,6 +2889,89 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
 
         {/* Analytics Tab */}
         <TabsContent value="analytics" className="mt-6">
+          {weeklyReport && (
+            <Card className="mb-6 border-0 shadow-md bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 text-white">
+              <CardHeader>
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2 text-white">
+                      <FileText className="h-5 w-5 text-sky-300" />
+                      Weekly Improvement Report
+                    </CardTitle>
+                    <CardDescription className="text-slate-300">
+                      {new Date(weeklyReport.weekStart).toLocaleDateString()} to {new Date(weeklyReport.weekEnd).toLocaleDateString()}
+                    </CardDescription>
+                  </div>
+                  <Badge className="w-fit bg-white/10 text-white hover:bg-white/10">
+                    {weeklyReport.newReviews} new review{weeklyReport.newReviews === 1 ? '' : 's'}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <p className="text-sm leading-7 text-slate-200">{weeklyReport.summary}</p>
+
+                <div className="grid gap-4 md:grid-cols-4">
+                  {[
+                    ['Price', weeklyReport.metrics.price],
+                    ['Quality', weeklyReport.metrics.quality],
+                    ['Behaviour', weeklyReport.metrics.behavior],
+                    ['Service', weeklyReport.metrics.service],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-300">{label}</p>
+                      <p className="mt-2 text-2xl font-semibold text-white">{value}/10</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+                    <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-200">What is working well</h4>
+                    <div className="mt-3 space-y-2">
+                      {weeklyReport.strengths.map((point) => (
+                        <div key={point} className="flex gap-2 text-sm text-emerald-50">
+                          <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                          <span>{point}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4">
+                    <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-200">Where to improve next</h4>
+                    <div className="mt-3 space-y-2">
+                      {weeklyReport.improvements.map((point) => (
+                        <div key={point} className="flex gap-2 text-sm text-amber-50">
+                          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                          <span>{point}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Trust Score Change</p>
+                    <p className="mt-2 text-xl font-semibold text-white">
+                      {weeklyReport.trustScoreStart.toFixed(1)} → {weeklyReport.trustScoreEnd.toFixed(1)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Avg Sentiment</p>
+                    <p className="mt-2 text-xl font-semibold text-white">{weeklyReport.avgSentiment.toFixed(2)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Complaints</p>
+                    <p className="mt-2 text-xl font-semibold text-white">{weeklyReport.complaints}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Resolved</p>
+                    <p className="mt-2 text-xl font-semibold text-white">{weeklyReport.resolved}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card className="border-0 shadow-md">
               <CardHeader><CardTitle>Sentiment Distribution</CardTitle></CardHeader>
@@ -2324,6 +3055,14 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
               <p className="text-xs text-center text-slate-500">
                 Customer can verify this bill in the TrustScore app using their phone number
               </p>
+              <Button
+                className="w-full"
+                onClick={() => handleDownloadBillPdf(lastGeneratedBill)}
+                disabled={!lastGeneratedBill.generatedBillUrl}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download PDF Bill
+              </Button>
             </div>
           )}
         </DialogContent>
@@ -2586,6 +3325,21 @@ function ReviewCard({
         </p>
       )}
       <p className="text-sm text-slate-700 dark:text-slate-300">{review.reviewText}</p>
+      {typeof review.priceRating === 'number' ? (
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[
+            ['Price', review.priceRating],
+            ['Quality', review.qualityRating],
+            ['Behaviour', review.behaviorRating],
+            ['Service', review.serviceRating],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-center dark:border-slate-700 dark:bg-slate-900/40">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">{label}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">{value}/10</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {review.aspects && Object.keys(review.aspects).length > 0 && (
         <div className="flex flex-wrap gap-2 mt-2">
           {Object.entries(review.aspects).map(([aspect, score]) => (
@@ -2741,34 +3495,112 @@ function ShopDetailView({ shop, onBack, isAuthenticated, token, onLoginRequired 
       {/* Shop Header */}
       <Card className="border-0 shadow-md">
         <CardContent className="pt-6">
-          <div className="flex flex-col md:flex-row md:items-start gap-6">
+          <div className="flex flex-col gap-6 md:flex-row md:items-start">
             <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center text-white text-3xl font-bold">
               {shop.name[0]}
             </div>
             <div className="flex-1">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-4">
                 <div>
                   <h1 className="text-2xl font-bold">{shop.name}</h1>
                   <p className="text-slate-500">{shop.description}</p>
                 </div>
                 <Badge>{shop.category}</Badge>
               </div>
-              <div className="flex flex-wrap gap-4 mt-4 text-sm text-slate-500">
-                <span className="flex items-center gap-1">
-                  <MapPin className="w-4 h-4" /> {shop.address}, {shop.city}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Phone className="w-4 h-4" /> {shop.phone}
-                </span>
-              </div>
-            </div>
-            <div className="flex flex-col items-center">
-              <TrustScoreGauge score={shop.trustScore} size="lg" showLabel />
-              <p className="mt-2 text-sm text-slate-500">{shop.reviewCount} reviews</p>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="overflow-hidden border-0 shadow-md">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <MapPin className="h-5 w-5 text-sky-600" />
+              Shop Location
+            </CardTitle>
+            <CardDescription>
+              Explore the shop on the map and jump to Google Maps for turn-by-turn directions.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-0">
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 md:grid-cols-2">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-white text-sky-600 shadow-sm">
+                  <MapPin className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Address</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700">
+                    {shop.address}, {shop.city}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-white text-sky-600 shadow-sm">
+                  <Phone className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Phone</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-700">{shop.phone}</p>
+                </div>
+              </div>
+            </div>
+            <ShopDiscoveryMap
+              shops={[shop]}
+              selectedShopId={shop.id}
+              onSelectShop={() => {}}
+              title="Map preview"
+              subtitle="Leaflet + OpenStreetMap preview for this shop"
+              mapHeightClassName="h-[220px] md:h-[280px]"
+              showLocateButton={false}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-md bg-gradient-to-br from-slate-50 via-white to-sky-50">
+          <CardContent className="flex h-full flex-col justify-between gap-5 pt-6">
+            <div className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg">
+                  <Route className="h-7 w-7" />
+                </div>
+                <div className="flex flex-col items-center text-center">
+                  <TrustScoreGauge score={shop.trustScore} size="lg" showLabel />
+                  <p className="mt-2 text-sm text-slate-500">{shop.reviewCount} reviews</p>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">Plan your visit</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Open this shop directly in Google Maps, get the route, and come back to share a verified review after your visit.
+                </p>
+              </div>
+              <div className="space-y-2 rounded-2xl border border-slate-200 bg-white/80 p-4 text-sm text-slate-600">
+                <p className="font-medium text-slate-900">{shop.name}</p>
+                <p>{shop.address}</p>
+                <p>{shop.city}</p>
+                <p>{shop.phone}</p>
+              </div>
+            </div>
+
+            <Button
+              className="w-full bg-gradient-to-r from-slate-800 to-black hover:from-slate-700 hover:to-slate-900"
+              onClick={() => {
+                const destination = encodeURIComponent(`${shop.address}, ${shop.city}`);
+                window.open(
+                  `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`,
+                  '_blank',
+                  'noopener,noreferrer'
+                );
+              }}
+            >
+              <Navigation className="mr-2 h-4 w-4" />
+              Get Directions
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Write Review CTA (if not authenticated) */}
       {!isAuthenticated && onLoginRequired && (

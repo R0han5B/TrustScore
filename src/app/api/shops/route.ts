@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromToken } from '@/lib/auth';
+import { buildShopGeocodeQuery, geocodeAddress } from '@/lib/geocoding';
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,15 +35,6 @@ export async function GET(request: NextRequest) {
     const [shops, total] = await Promise.all([
       db.shop.findMany({
         where,
-        include: {
-          trustScores: {
-            orderBy: { calculatedAt: 'desc' },
-            take: 1,
-          },
-          _count: {
-            select: { reviews: true },
-          },
-        },
         orderBy: { createdAt: 'desc' },
         take: limit,
         skip: offset,
@@ -50,13 +42,25 @@ export async function GET(request: NextRequest) {
       db.shop.count({ where }),
     ]);
 
-    const shopsWithScore = shops.map((shop) => ({
-      ...shop,
-      trustScore: shop.trustScores[0]?.score || 50,
-      reviewCount: shop._count.reviews,
-      trustScores: undefined,
-      _count: undefined,
-    }));
+    const shopsWithScore = await Promise.all(
+      shops.map(async (shop) => {
+        const [latestTrustScore, reviewCount] = await Promise.all([
+          db.trustScore.findFirst({
+            where: { shopId: shop.id },
+            orderBy: { calculatedAt: 'desc' },
+          }),
+          db.review.count({
+            where: { shopId: shop.id },
+          }),
+        ]);
+
+        return {
+          ...shop,
+          trustScore: latestTrustScore?.score || 50,
+          reviewCount,
+        };
+      })
+    );
 
     return NextResponse.json({
       success: true,
@@ -146,6 +150,8 @@ export async function POST(request: NextRequest) {
         address,
         city,
         pincode,
+        latitude: null,
+        longitude: null,
         phone,
         email,
         registrationNo,
@@ -153,6 +159,21 @@ export async function POST(request: NextRequest) {
         ownerId: user.id,
       },
     });
+
+    const geocodeResult = await geocodeAddress(
+      buildShopGeocodeQuery({ name, address, city, pincode }),
+      city
+    );
+
+    const shopWithCoordinates = geocodeResult.coordinates
+      ? await db.shop.update({
+          where: { id: shop.id },
+          data: {
+            latitude: geocodeResult.coordinates.lat,
+            longitude: geocodeResult.coordinates.lon,
+          },
+        })
+      : shop;
 
     // Create initial trust score
     await db.trustScore.create({
@@ -170,7 +191,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'Shop created successfully',
-      shop,
+      shop: shopWithCoordinates,
     });
   } catch (error) {
     console.error('Create shop error:', error);

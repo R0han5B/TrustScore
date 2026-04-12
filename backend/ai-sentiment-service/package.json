@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "description": "AI Sentiment Analysis Microservice for Trust Scoring Platform",
   "scripts": {
-    "dev": "./venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 5001 --reload"
+    "dev": "python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
   }
 }
