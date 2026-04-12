@@ -54,6 +54,6 @@ __pycache__/
 *.pyc
 node_modules/
 .env
-.zscripts/
+
 backend/ai-sentiment-service/artifacts/
 backend/ai-sentiment-service/models/
