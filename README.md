@@ -179,7 +179,6 @@ This keeps map rendering free while still offering a familiar navigation experie
 - JWT authentication
 - bcryptjs
 - Nodemailer
-- weekly report generation
 
 ### AI / ML
 
