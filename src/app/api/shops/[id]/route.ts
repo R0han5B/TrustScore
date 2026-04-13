@@ -217,9 +217,16 @@ export async function DELETE(
       where: { id },
     });
 
+    if (shop.ownerId === user.id && user.role === 'SHOPKEEPER') {
+      await db.user.delete({
+        where: { id: user.id },
+      });
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'Shop deleted successfully',
+      message: 'Shop and shopkeeper account deleted successfully',
+      accountDeleted: shop.ownerId === user.id && user.role === 'SHOPKEEPER',
     });
   } catch (error) {
     console.error('Delete shop error:', error);

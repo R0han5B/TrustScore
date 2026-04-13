@@ -1,4 +1,5 @@
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 
 export type Coordinates = {
   lat: number;
@@ -86,6 +87,59 @@ export async function geocodeAddress(queryText: string, city?: string): Promise<
   }
 
   return { coordinates: null, source: 'none' };
+}
+
+export async function reverseGeocodeCoordinates(lat: number, lon: number): Promise<{
+  city: string | null;
+  source: 'nominatim' | 'none';
+}> {
+  try {
+    const query = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+      format: 'jsonv2',
+      zoom: '10',
+      addressdetails: '1',
+    });
+
+    const response = await fetch(`${NOMINATIM_REVERSE_URL}?${query.toString()}`, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'TrustScore/1.0 (reverse geocoding)',
+      },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      return { city: null, source: 'none' };
+    }
+
+    const result = (await response.json()) as {
+      address?: {
+        city?: string;
+        town?: string;
+        village?: string;
+        county?: string;
+        state_district?: string;
+      };
+    };
+
+    const city =
+      result.address?.city ||
+      result.address?.town ||
+      result.address?.village ||
+      result.address?.county ||
+      result.address?.state_district ||
+      null;
+
+    return {
+      city,
+      source: city ? 'nominatim' : 'none',
+    };
+  } catch (error) {
+    console.error('Reverse geocoding error:', error);
+    return { city: null, source: 'none' };
+  }
 }
 
 export { CITY_FALLBACKS };

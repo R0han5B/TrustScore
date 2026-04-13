@@ -76,6 +76,11 @@ export const authAPI = {
     }),
 
   getMe: (token: string) => fetchAPI('/auth/me', {}, token),
+
+  deleteAccount: (token: string) =>
+    fetchAPI('/auth/delete', {
+      method: 'DELETE',
+    }, token),
 };
 
 // Shops API

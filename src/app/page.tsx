@@ -67,6 +67,24 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+const CITY_NAME_ALIASES: Record<string, string> = {
+  bangalore: 'bengaluru',
+};
+
+function normalizeCityName(value?: string | null) {
+  if (!value) return '';
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\bdistrict\b/g, '')
+    .replace(/\bcity\b/g, '')
+    .replace(/\bmetro(?:politan)?\b/g, '')
+    .replace(/\bmunicipal(?:ity| corporation)?\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return CITY_NAME_ALIASES[normalized] || normalized;
+}
+
 // ============================================
 // MAIN APP COMPONENT
 // ============================================
@@ -273,6 +291,8 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
     category: 'OTHER',
   });
   const isRegisterOtpVerified = !!email && verifiedRegisterEmail === email;
+  const showRegisterOtpInput =
+    otpPurpose === 'register' && !isRegisterOtpVerified;
 
   const handleSendOTP = async (purpose: 'login' | 'register' = 'login') => {
     if (!email) {
@@ -288,7 +308,7 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
       if (res.success) {
         setAuthMessage({ type: 'success', text: `OTP sent to ${email}. Enter it below to verify.` });
         toast.success('OTP sent to your email');
-        setMode('otp');
+        setMode(purpose === 'register' ? 'register' : 'otp');
       }
     } catch (error: unknown) {
       setAuthMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to send OTP.' });
@@ -552,9 +572,13 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
           </TabsContent>
 
           <TabsContent value="register" className="space-y-4">
-            {mode === 'otp' && otpPurpose === 'register' ? (
-              renderOtpVerification()
-            ) : (
+            <>
+              {authMessage ? (
+                <Alert className={authMessage.type === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}>
+                  {authMessage.type === 'error' ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+                  <AlertDescription>{authMessage.text}</AlertDescription>
+                </Alert>
+              ) : null}
               <>
                 <Alert className={isRegisterOtpVerified ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-sky-200 bg-sky-50'}>
                   <Mail className="h-4 w-4" />
@@ -614,6 +638,45 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
                     </Badge>
                   ) : null}
                 </div>
+                {showRegisterOtpInput ? (
+                  <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50 p-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-slate-900">Enter OTP to verify email</p>
+                      <p className="text-sm text-slate-600">We sent a 6-digit code to {email}.</p>
+                    </div>
+                    <Input
+                      id="register-otp"
+                      type="text"
+                      placeholder="000000"
+                      maxLength={6}
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                      className="text-center text-2xl tracking-widest"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 bg-gradient-to-r from-slate-800 to-black"
+                        onClick={handleVerifyOTP}
+                        disabled={isLoading}
+                      >
+                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                        Verify Email
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() => {
+                          setOtp('');
+                          setAuthMessage(null);
+                          setOtpPurpose('login');
+                        }}
+                        disabled={isLoading}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label htmlFor="reg-password">Password</Label>
                   <Input
@@ -739,7 +802,7 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
                   {isRegisterOtpVerified ? 'Register' : 'Verify Email First'}
                 </Button>
               </>
-            )}
+            </>
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -755,11 +818,14 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
   const [shops, setShops] = useState<Shop[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [locationScope, setLocationScope] = useState('all');
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [homepageMapShop, setHomepageMapShop] = useState<Shop | null>(null);
   const [homepageDistances, setHomepageDistances] = useState<Record<string, number>>({});
   const [homepageLocateSignal, setHomepageLocateSignal] = useState(0);
+  const [homepageUserCoordinates, setHomepageUserCoordinates] = useState<{ lat: number; lon: number } | null>(null);
+  const [homepageUserCity, setHomepageUserCity] = useState<string | null>(null);
 
   // Fetch shops
   useEffect(() => {
@@ -783,15 +849,55 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
   }, [searchQuery, categoryFilter]);
 
   const filteredShops = useMemo(() => {
-    if (!searchQuery && categoryFilter === 'all') return shops;
+    const normalizedUserCity = normalizeCityName(homepageUserCity);
+    if (!searchQuery && categoryFilter === 'all' && locationScope === 'all') return shops;
     return shops.filter((shop) => {
       const matchesSearch = !searchQuery || 
         shop.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         shop.city.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCategory = categoryFilter === 'all' || shop.category === categoryFilter;
-      return matchesSearch && matchesCategory;
+      const normalizedShopCity = normalizeCityName(shop.city);
+      const matchesLocation =
+        locationScope === 'all' ||
+        !normalizedUserCity ||
+        (locationScope === 'my-city'
+          ? normalizedShopCity === normalizedUserCity
+          : normalizedShopCity !== normalizedUserCity);
+      return matchesSearch && matchesCategory && matchesLocation;
     });
-  }, [shops, searchQuery, categoryFilter]);
+  }, [shops, searchQuery, categoryFilter, locationScope, homepageUserCity]);
+
+  useEffect(() => {
+    if (!homepageUserCoordinates) {
+      setHomepageUserCity(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const lookupCity = async () => {
+      try {
+        const query = new URLSearchParams({
+          lat: String(homepageUserCoordinates.lat),
+          lon: String(homepageUserCoordinates.lon),
+        });
+        const response = await fetch(`/api/maps/reverse-geocode?${query.toString()}`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { success: boolean; city?: string | null };
+        if (!cancelled) {
+          setHomepageUserCity(data.city || null);
+        }
+      } catch (error) {
+        console.error('Failed to detect homepage user city:', error);
+      }
+    };
+
+    lookupCity();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [homepageUserCoordinates]);
 
   const homepageExploreShops = useMemo(() => {
     return [...filteredShops]
@@ -907,6 +1013,28 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
                     <SelectItem value="OTHER">📦 Other</SelectItem>
                   </SelectContent>
                 </Select>
+                <Select
+                  value={locationScope}
+                  onValueChange={(value) => {
+                    setLocationScope(value);
+                    if ((value === 'my-city' || value === 'outside-city') && !homepageUserCoordinates) {
+                      setHomepageLocateSignal((current) => current + 1);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-12 w-full border-2 border-slate-200 bg-white md:w-52">
+                    <SelectValue placeholder="Location Scope" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Locations</SelectItem>
+                    <SelectItem value="my-city">
+                      {homepageUserCity ? `In ${homepageUserCity}` : 'In My City'}
+                    </SelectItem>
+                    <SelectItem value="outside-city">
+                      {homepageUserCity ? `Outside ${homepageUserCity}` : 'Outside My City'}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button
                   type="button"
                   variant="outline"
@@ -948,6 +1076,7 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
             selectedShopId={homepageMapShop?.id ?? null}
             onSelectShop={(shop) => setHomepageMapShop(shop)}
             onDistancesChange={setHomepageDistances}
+            onUserLocationChange={setHomepageUserCoordinates}
             locateSignal={homepageLocateSignal}
             title="Explore trusted shops on the map"
             subtitle="Free Leaflet map with OpenStreetMap tiles. Directions open in Google Maps."
@@ -1196,9 +1325,12 @@ interface PendingBill extends Bill {
 }
 
 function CustomerDashboard({ user, token }: { user: User; token: string }) {
+  const logout = useStore((state) => state.logout);
   const [activeTab, setActiveTab] = useState('home');
   const [shops, setShops] = useState<Shop[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [locationScope, setLocationScope] = useState('all');
   const [selectedShop, setSelectedShop] = useState<Shop | null>(null);
   const [highlightedShopId, setHighlightedShopId] = useState<string | null>(null);
   const [userBills, setUserBills] = useState<Bill[]>([]);
@@ -1208,6 +1340,7 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
   const [editingReview, setEditingReview] = useState<Review | null>(null);
   const [editReviewText, setEditReviewText] = useState('');
   const [userCoordinates, setUserCoordinates] = useState<{ lat: number; lon: number } | null>(null);
+  const [userCity, setUserCity] = useState<string | null>(null);
   const [distanceByShop, setDistanceByShop] = useState<Record<string, number>>({});
 
   // Fetch shops
@@ -1338,15 +1471,51 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm(
+      'Delete your account permanently? This will remove your customer profile, reviews, bills, and related customer data from the database.'
+    );
+
+    if (!confirmed) return;
+
+    setIsLoading(true);
+    try {
+      const res = await authAPI.deleteAccount(token);
+      if (res.success) {
+        toast.success('Your account and customer data were deleted successfully.');
+        logout();
+      } else {
+        toast.error(res.error || 'Failed to delete account');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete account');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const filteredShops = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
-    const base = !normalizedQuery || normalizedQuery === 'near me'
-      ? shops
-      : shops.filter(
-          (shop) =>
-            shop.name.toLowerCase().includes(normalizedQuery) ||
-            shop.city.toLowerCase().includes(normalizedQuery)
-        );
+    const normalizedUserCity = normalizeCityName(userCity);
+    const base = shops.filter((shop) => {
+      const matchesSearch =
+        !normalizedQuery ||
+        normalizedQuery === 'near me' ||
+        shop.name.toLowerCase().includes(normalizedQuery) ||
+        shop.city.toLowerCase().includes(normalizedQuery);
+
+      const matchesCategory =
+        categoryFilter === 'all' || shop.category === categoryFilter;
+      const normalizedShopCity = normalizeCityName(shop.city);
+      const matchesLocation =
+        locationScope === 'all' ||
+        !normalizedUserCity ||
+        (locationScope === 'my-city'
+          ? normalizedShopCity === normalizedUserCity
+          : normalizedShopCity !== normalizedUserCity);
+
+      return matchesSearch && matchesCategory && matchesLocation;
+    });
 
     const withDistance = base.map((shop) => ({
       ...shop,
@@ -1362,7 +1531,39 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
     }
 
     return withDistance;
-  }, [distanceByShop, searchQuery, shops, userCoordinates]);
+  }, [categoryFilter, distanceByShop, locationScope, searchQuery, shops, userCity, userCoordinates]);
+
+  useEffect(() => {
+    if (!userCoordinates) {
+      setUserCity(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const lookupCity = async () => {
+      try {
+        const query = new URLSearchParams({
+          lat: String(userCoordinates.lat),
+          lon: String(userCoordinates.lon),
+        });
+        const response = await fetch(`/api/maps/reverse-geocode?${query.toString()}`);
+        if (!response.ok) return;
+        const data = (await response.json()) as { success: boolean; city?: string | null };
+        if (!cancelled) {
+          setUserCity(data.city || null);
+        }
+      } catch (error) {
+        console.error('Failed to detect user city:', error);
+      }
+    };
+
+    lookupCity();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userCoordinates]);
 
   const handleUseCurrentLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -1469,6 +1670,43 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
                     className="pl-12 h-12 border-2"
                   />
                 </div>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="h-12 w-full sm:w-[220px] border-2 bg-white">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="GROCERY">Grocery</SelectItem>
+                    <SelectItem value="RESTAURANT">Restaurant</SelectItem>
+                    <SelectItem value="PHARMACY">Pharmacy</SelectItem>
+                    <SelectItem value="ELECTRONICS">Electronics</SelectItem>
+                    <SelectItem value="CLOTHING">Clothing</SelectItem>
+                    <SelectItem value="SERVICE">Service</SelectItem>
+                    <SelectItem value="OTHER">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={locationScope}
+                  onValueChange={(value) => {
+                    setLocationScope(value);
+                    if ((value === 'my-city' || value === 'outside-city') && !userCoordinates) {
+                      handleUseCurrentLocation();
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-12 w-full sm:w-[220px] border-2 bg-white">
+                    <SelectValue placeholder="Location Scope" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Locations</SelectItem>
+                    <SelectItem value="my-city">
+                      {userCity ? `In ${userCity}` : 'In My City'}
+                    </SelectItem>
+                    <SelectItem value="outside-city">
+                      {userCity ? `Outside ${userCity}` : 'Outside My City'}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button variant="outline" className="h-12 px-5" onClick={handleUseCurrentLocation} disabled={isLoading}>
                   <LocateFixed className="mr-2 h-4 w-4" />
                   Near Me
@@ -1770,6 +2008,28 @@ function CustomerDashboard({ user, token }: { user: User; token: string }) {
                     <p className="text-sm text-slate-500">Reviews Given</p>
                   </CardContent>
                 </Card>
+              </div>
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-red-800">
+                      <AlertTriangle className="h-4 w-4" />
+                      Delete customer account
+                    </h3>
+                    <p className="text-sm text-red-700">
+                      This permanently removes your customer account, uploaded bills, reviews, and related personal data.
+                    </p>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    onClick={handleDeleteAccount}
+                    disabled={isLoading}
+                    className="sm:min-w-[180px]"
+                  >
+                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
+                    Delete Account
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -2154,6 +2414,7 @@ interface GeneratedBill {
 }
 
 function ShopkeeperDashboard({ token }: { user: User; token: string }) {
+  const logout = useStore((state) => state.logout);
   const [shop, setShop] = useState<Shop | null>(null);
   const [trustScoreData, setTrustScoreData] = useState<{
     score: number;
@@ -2238,6 +2499,10 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
           if (weeklyReportRes.success) {
             setWeeklyReport(weeklyReportRes.report);
           }
+        } else {
+          toast.error(shopRes.error || 'No shop found');
+          logout();
+          return;
         }
 
         // Fetch generated bills
@@ -2249,6 +2514,11 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
           setGeneratedBills(billsData.bills);
         }
       } catch (error) {
+        if (error instanceof Error && error.message.toLowerCase().includes('no shop found')) {
+          toast.error('Your shop account no longer exists. Please sign in again if needed.');
+          logout();
+          return;
+        }
         console.error('Failed to fetch shop data:', error);
         toast.error('Failed to load dashboard data');
       } finally {
@@ -2434,7 +2704,7 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
 
   const handleDeleteShop = async () => {
     if (!shop) return;
-    if (!confirm('Are you sure you want to remove your shop from the database? This will also remove related bills, reviews, alerts, and trust score data.')) {
+    if (!confirm('Are you sure you want to remove your shop from the database? This will also delete your shopkeeper account and all related shop data.')) {
       return;
     }
 
@@ -2442,13 +2712,8 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
     try {
       const res = await shopsAPI.delete(shop.id, token);
       if (res.success) {
-        setShop(null);
-        setReviews([]);
-        setComplaints([]);
-        setGeneratedBills([]);
-        setTrustScoreData(null);
-        setIsEditShopOpen(false);
-        toast.success('Shop removed successfully');
+        logout();
+        toast.success(res.accountDeleted ? 'Shop and account deleted successfully' : 'Shop removed successfully');
       }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete shop');
