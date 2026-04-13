@@ -260,6 +260,7 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
   const [role, setRole] = useState<'CUSTOMER' | 'SHOPKEEPER'>('CUSTOMER');
   const [otp, setOtp] = useState('');
   const [otpPurpose, setOtpPurpose] = useState<'login' | 'register'>('login');
+  const [authMessage, setAuthMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [verifiedRegisterEmail, setVerifiedRegisterEmail] = useState<string | null>(null);
   const [shopDetails, setShopDetails] = useState({
     name: '',
@@ -275,18 +276,22 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
 
   const handleSendOTP = async (purpose: 'login' | 'register' = 'login') => {
     if (!email) {
+      setAuthMessage({ type: 'error', text: 'Please enter your email first.' });
       toast.error('Please enter your email');
       return;
     }
     setIsLoading(true);
+    setAuthMessage(null);
     try {
       setOtpPurpose(purpose);
       const res = await authAPI.sendOTP(email, phone, name);
       if (res.success) {
+        setAuthMessage({ type: 'success', text: `OTP sent to ${email}. Enter it below to verify.` });
         toast.success('OTP sent to your email');
         setMode('otp');
       }
     } catch (error: unknown) {
+      setAuthMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to send OTP.' });
       toast.error(error instanceof Error ? error.message : 'Failed to send OTP');
     } finally {
       setIsLoading(false);
@@ -295,25 +300,30 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
 
   const handleVerifyOTP = async () => {
     if (!otp) {
+      setAuthMessage({ type: 'error', text: 'Please enter the OTP.' });
       toast.error('Please enter the OTP');
       return;
     }
     setIsLoading(true);
+    setAuthMessage(null);
     try {
       const res = await authAPI.verifyOTP(email, otp);
       if (res.success) {
         if (otpPurpose === 'register') {
           setVerifiedRegisterEmail(email);
           setOtp('');
+          setAuthMessage({ type: 'success', text: 'OTP verified successfully. You can complete signup now.' });
           setMode('register');
           toast.success('Email verified. You can complete registration now.');
         } else {
+          setAuthMessage({ type: 'success', text: 'OTP verified successfully. Logging you in.' });
           onAuth(res.user, res.token);
           toast.success('Login successful!');
         }
       }
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Invalid OTP');
+      setAuthMessage({ type: 'error', text: 'Wrong OTP. Please check the code and try again.' });
+      toast.error(error instanceof Error ? error.message : 'Wrong OTP');
     } finally {
       setIsLoading(false);
     }
@@ -321,14 +331,17 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
 
   const handleRegister = async () => {
     if (!email || !password || !name) {
+      setAuthMessage({ type: 'error', text: 'Please fill all required fields.' });
       toast.error('Please fill all required fields');
       return;
     }
     if (!isRegisterOtpVerified) {
+      setAuthMessage({ type: 'error', text: 'Please verify your email with OTP before registering.' });
       toast.error('Please verify your email with OTP before registering');
       return;
     }
     setIsLoading(true);
+    setAuthMessage(null);
     try {
       const res = await authAPI.register({
         email,
@@ -339,10 +352,12 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
         shopDetails: role === 'SHOPKEEPER' ? shopDetails : undefined,
       });
       if (res.success) {
+        setAuthMessage({ type: 'success', text: 'Registration successful.' });
         onAuth(res.user, res.token);
         toast.success('Registration successful!');
       }
     } catch (error: unknown) {
+      setAuthMessage({ type: 'error', text: error instanceof Error ? error.message : 'Registration failed.' });
       toast.error(error instanceof Error ? error.message : 'Registration failed');
     } finally {
       setIsLoading(false);
@@ -351,18 +366,22 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
 
   const handleLogin = async () => {
     if (!email || !password) {
+      setAuthMessage({ type: 'error', text: 'Please enter email and password.' });
       toast.error('Please enter email and password');
       return;
     }
     setIsLoading(true);
+    setAuthMessage(null);
     try {
       const res = await authAPI.login(email, password);
       if (res.success) {
+        setAuthMessage({ type: 'success', text: 'Login successful.' });
         onAuth(res.user, res.token);
         toast.success('Login successful!');
       }
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Login failed');
+      setAuthMessage({ type: 'error', text: 'Wrong password or login details. Please try again.' });
+      toast.error(error instanceof Error ? error.message : 'Wrong password');
     } finally {
       setIsLoading(false);
     }
@@ -375,6 +394,7 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
     setPhone('');
     setOtp('');
     setOtpPurpose('login');
+    setAuthMessage(null);
     setVerifiedRegisterEmail(null);
     setRole('CUSTOMER');
     setShopDetails({
@@ -445,62 +465,90 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
           </TabsList>
 
           <TabsContent value="login" className="space-y-4">
-            {mode === 'otp' && otpPurpose === 'login' ? (
-              renderOtpVerification()
-            ) : (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
+            <>
+              {authMessage && (mode !== 'otp' || otpPurpose === 'login') ? (
+                <Alert className={authMessage.type === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}>
+                  {authMessage.type === 'error' ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+                  <AlertDescription>{authMessage.text}</AlertDescription>
+                </Alert>
+              ) : null}
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="your@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              <Button
+                className="w-full bg-gradient-to-r from-slate-800 to-black"
+                onClick={handleLogin}
+                disabled={isLoading}
+              >
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Login
+              </Button>
+              <div className="relative my-3">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white dark:bg-slate-950 px-2 text-muted-foreground">or</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Login with OTP</Label>
+                <div className="flex gap-2">
                   <Input
-                    id="email"
                     type="email"
-                    placeholder="your@email.com"
+                    placeholder="Email for OTP"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
+                  <Button variant="outline" onClick={() => handleSendOTP('login')} disabled={isLoading}>
+                    Send OTP
+                  </Button>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
+              </div>
+
+              {mode === 'otp' && otpPurpose === 'login' ? (
+                <div className="space-y-4 rounded-xl border border-sky-200 bg-sky-50 p-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-slate-900">Verify OTP</p>
+                    <p className="text-sm text-slate-600">OTP sent to {email}. Enter the 6-digit code below.</p>
+                  </div>
                   <Input
-                    id="password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    id="login-otp"
+                    type="text"
+                    placeholder="000000"
+                    maxLength={6}
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    className="text-center text-2xl tracking-widest"
                   />
+                  <Button
+                    className="w-full bg-gradient-to-r from-slate-800 to-black"
+                    onClick={handleVerifyOTP}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                    Verify & Login
+                  </Button>
                 </div>
-                <Button
-                  className="w-full bg-gradient-to-r from-slate-800 to-black"
-                  onClick={handleLogin}
-                  disabled={isLoading}
-                >
-                  {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  Login
-                </Button>
-                <div className="relative my-3">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white dark:bg-slate-950 px-2 text-muted-foreground">or</span>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Login with OTP</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      type="email"
-                      placeholder="Email for OTP"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                <Button variant="outline" onClick={handleSendOTP} disabled={isLoading}>
-                      Send OTP
-                </Button>
-                  </div>
-                </div>
-              </>
-            )}
+              ) : null}
+            </>
           </TabsContent>
 
           <TabsContent value="register" className="space-y-4">
