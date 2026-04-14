@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { analyzeSentiment } from '@/lib/ai-service';
+import {
+  decryptBillFields,
+  hashEmailForLookup,
+  hashPhoneForLookup,
+  valuesMatchEmail,
+  valuesMatchPhone,
+} from '@/lib/data-protection';
 import { calculateHybridReviewSentiment, clamp, hybridReviewToTrustScore } from '@/lib/review-scoring';
 
 export async function POST(request: NextRequest) {
@@ -55,10 +62,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if bill belongs to this customer (by ID or phone/email)
+    const publicBill = decryptBillFields(bill);
     const isOwner = 
       bill.customerId === user.id ||
-      bill.customerPhone === user.phone ||
-      bill.customerEmail === user.email;
+      (!!user.phone &&
+        ((bill.customerPhoneHash && bill.customerPhoneHash === hashPhoneForLookup(user.phone)) ||
+          valuesMatchPhone(publicBill.customerPhone, user.phone))) ||
+      ((bill.customerEmailHash && bill.customerEmailHash === hashEmailForLookup(user.email)) ||
+        valuesMatchEmail(publicBill.customerEmail, user.email));
 
     if (!isOwner) {
       return NextResponse.json(

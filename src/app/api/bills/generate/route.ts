@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
+import {
+  decryptBillFields,
+  encryptValue,
+  hashEmailForLookup,
+  hashPhoneForLookup,
+} from '@/lib/data-protection';
 
 // Generate a new bill (Shopkeeper only)
 export async function POST(request: NextRequest) {
@@ -51,12 +57,22 @@ export async function POST(request: NextRequest) {
     let existingCustomer = null;
     if (customerPhone) {
       existingCustomer = await db.user.findFirst({
-        where: { phone: customerPhone },
+        where: {
+          OR: [
+            ...(hashPhoneForLookup(customerPhone) ? [{ phoneHash: hashPhoneForLookup(customerPhone)! }] : []),
+            { phone: customerPhone },
+          ],
+        },
       });
     }
     if (!existingCustomer && customerEmail) {
       existingCustomer = await db.user.findFirst({
-        where: { email: customerEmail },
+        where: {
+          OR: [
+            ...(hashEmailForLookup(customerEmail) ? [{ emailHash: hashEmailForLookup(customerEmail)! }] : []),
+            { email: customerEmail.toLowerCase() },
+          ],
+        },
       });
     }
 
@@ -66,9 +82,11 @@ export async function POST(request: NextRequest) {
         billNumber,
         shopId: shop.id,
         customerId: existingCustomer?.id || null,
-        customerName: customerName || 'Walk-in Customer',
-        customerPhone: customerPhone || null,
-        customerEmail: customerEmail || null,
+        customerName: encryptValue(customerName || 'Walk-in Customer'),
+        customerPhone: encryptValue(customerPhone || null),
+        customerPhoneHash: hashPhoneForLookup(customerPhone),
+        customerEmail: encryptValue(customerEmail || null),
+        customerEmailHash: hashEmailForLookup(customerEmail),
         billDate: new Date(),
         totalAmount,
         items: JSON.stringify(items),
@@ -83,15 +101,17 @@ export async function POST(request: NextRequest) {
       data: { generatedBillUrl },
     });
 
+    const publicBill = decryptBillFields(bill);
+
     return NextResponse.json({
       success: true,
       message: 'Bill generated successfully',
       bill: {
         id: bill.id,
         billNumber: bill.billNumber,
-        customerName: bill.customerName,
-        customerPhone: bill.customerPhone,
-        customerEmail: bill.customerEmail,
+        customerName: publicBill.customerName,
+        customerPhone: publicBill.customerPhone,
+        customerEmail: publicBill.customerEmail,
         items: items,
         totalAmount: bill.totalAmount,
         billDate: bill.billDate,
@@ -156,7 +176,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       bills: bills.map((bill) => ({
-        ...bill,
+        ...decryptBillFields(bill),
         items: bill.items ? JSON.parse(bill.items) : [],
       })),
       total,

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
+import {
+  decryptBillFields,
+  decryptShopFields,
+  hashEmailForLookup,
+  hashPhoneForLookup,
+} from '@/lib/data-protection';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,8 +25,18 @@ export async function GET(request: NextRequest) {
       where: {
         OR: [
           { customerId: user.id },
-          { customerPhone: user.phone },
-          { customerEmail: user.email },
+          ...(user.phone
+            ? [
+                ...(hashPhoneForLookup(user.phone) ? [{ customerPhoneHash: hashPhoneForLookup(user.phone)! }] : []),
+                { customerPhone: user.phone },
+              ]
+            : []),
+          ...(user.email
+            ? [
+                ...(hashEmailForLookup(user.email) ? [{ customerEmailHash: hashEmailForLookup(user.email)! }] : []),
+                { customerEmail: user.email },
+              ]
+            : []),
         ].filter(Boolean),
       },
       include: {
@@ -48,7 +64,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       bills: bills.map((bill) => ({
-        ...bill,
+        ...decryptBillFields({
+          ...bill,
+          shop: decryptShopFields(bill.shop),
+        }),
         items: bill.items ? JSON.parse(bill.items) : [],
       })),
     });

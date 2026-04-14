@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { decryptShopFields } from '@/lib/data-protection';
 
 export async function GET(request: NextRequest) {
   try {
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
       success: true,
       reviews: reviews.map((review) => ({
         ...review,
-        shop: shopById.get(review.shopId) || null,
+        shop: shopById.get(review.shopId) ? decryptShopFields(shopById.get(review.shopId)!) : null,
         bill: billById.get(review.billId) || null,
         customer: {
           id: user.id,

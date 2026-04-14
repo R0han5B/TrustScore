@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromToken } from '@/lib/auth';
+import { decryptShopFields, decryptUserFields, encryptValue } from '@/lib/data-protection';
 import { buildShopGeocodeQuery, geocodeAddress } from '@/lib/geocoding';
 
 export async function GET(
@@ -58,11 +59,17 @@ export async function GET(
     return NextResponse.json({
       success: true,
       shop: {
-        ...shop,
+        ...decryptShopFields({
+          ...shop,
+          owner: shop.owner ? decryptUserFields(shop.owner) : shop.owner,
+        }),
         trustScore: shop.trustScores[0]?.score || 50,
         reviewCount: shop._count.reviews,
         billCount: shop._count.bills,
-        recentReviews,
+        recentReviews: recentReviews.map((review) => ({
+          ...review,
+          customer: review.customer ? decryptUserFields(review.customer) : null,
+        })),
         sentimentBreakdown: sentimentBreakdown.reduce(
           (acc, item) => {
             acc[item.sentimentLabel] = item._count;
@@ -142,8 +149,8 @@ export async function PUT(
         pincode: nextPincode,
         latitude: geocodeResult.coordinates?.lat ?? null,
         longitude: geocodeResult.coordinates?.lon ?? null,
-        phone: body.phone,
-        email: body.email,
+        phone: body.phone !== undefined ? encryptValue(body.phone) : undefined,
+        email: body.email !== undefined ? encryptValue(body.email) : undefined,
         gstNumber: body.gstNumber,
         logoUrl: body.logoUrl,
       },
@@ -152,7 +159,7 @@ export async function PUT(
     return NextResponse.json({
       success: true,
       message: 'Shop updated successfully',
-      shop: updatedShop,
+      shop: decryptShopFields(updatedShop),
     });
   } catch (error) {
     console.error('Update shop error:', error);

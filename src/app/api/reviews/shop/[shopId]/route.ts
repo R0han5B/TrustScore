@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { decryptUserFields } from '@/lib/data-protection';
 import { calculateHybridReviewSentiment } from '@/lib/review-scoring';
 
 export async function GET(
@@ -82,7 +83,7 @@ export async function GET(
         }).hybridLabel,
         customer: {
           id: review.customer?.id || '',
-          name: maskName(review.customer?.name || null),
+          name: maskName(review.customer ? decryptUserFields(review.customer).name : null),
           purchaseCount,
           isVerified: isVerifiedCustomer,
         },

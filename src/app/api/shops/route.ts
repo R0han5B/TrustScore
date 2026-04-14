@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromToken } from '@/lib/auth';
+import { decryptShopFields, encryptValue } from '@/lib/data-protection';
 import { buildShopGeocodeQuery, geocodeAddress } from '@/lib/geocoding';
 
 export async function GET(request: NextRequest) {
@@ -20,7 +21,6 @@ export async function GET(request: NextRequest) {
       where.OR = [
         { name: { contains: search } },
         { description: { contains: search } },
-        { address: { contains: search } },
       ];
     }
 
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
         ]);
 
         return {
-          ...shop,
+          ...decryptShopFields(shop),
           trustScore: latestTrustScore?.score || 50,
           reviewCount,
         };
@@ -152,8 +152,8 @@ export async function POST(request: NextRequest) {
         pincode,
         latitude: null,
         longitude: null,
-        phone,
-        email,
+        phone: encryptValue(phone),
+        email: encryptValue(email),
         registrationNo,
         gstNumber,
         ownerId: user.id,
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'Shop created successfully',
-      shop: shopWithCoordinates,
+      shop: decryptShopFields(shopWithCoordinates),
     });
   } catch (error) {
     console.error('Create shop error:', error);

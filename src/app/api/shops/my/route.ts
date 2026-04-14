@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromToken } from '@/lib/auth';
+import { decryptShopFields } from '@/lib/data-protection';
 
 export async function GET(request: NextRequest) {
   try {
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       shop: {
-        ...shop,
+        ...decryptShopFields(shop),
         trustScore: shop.trustScores[0]?.score || 50,
         trustScoreData: shop.trustScores[0] || null,
         reviewCount: shop._count.reviews,

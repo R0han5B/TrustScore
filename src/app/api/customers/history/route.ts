@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
+import {
+  decryptBillFields,
+  hashEmailForLookup,
+  hashPhoneForLookup,
+} from '@/lib/data-protection';
 
 // Get customer purchase history by phone (Shopkeeper only)
 export async function GET(request: NextRequest) {
@@ -40,9 +45,15 @@ export async function GET(request: NextRequest) {
     // Find bills for this customer at this shop
     const where: Record<string, unknown> = { shopId: shop.id };
     if (phone) {
-      where.customerPhone = phone;
+      where.OR = [
+        ...(hashPhoneForLookup(phone) ? [{ customerPhoneHash: hashPhoneForLookup(phone)! }] : []),
+        { customerPhone: phone },
+      ];
     } else if (email) {
-      where.customerEmail = email;
+      where.OR = [
+        ...(hashEmailForLookup(email) ? [{ customerEmailHash: hashEmailForLookup(email)! }] : []),
+        { customerEmail: email },
+      ];
     }
 
     const bills = await db.bill.findMany({
@@ -69,12 +80,14 @@ export async function GET(request: NextRequest) {
       .filter((b) => b.review)
       .reduce((sum, b) => sum + (b.review?.sentimentScore || 0), 0) / (reviewsGiven || 1);
 
+    const latestBill = bills[0] ? decryptBillFields(bills[0]) : null;
+
     return NextResponse.json({
       success: true,
       customer: {
-        phone: phone || bills[0]?.customerPhone,
-        email: email || bills[0]?.customerEmail,
-        name: bills[0]?.customerName || 'Customer',
+        phone: phone || latestBill?.customerPhone,
+        email: email || latestBill?.customerEmail,
+        name: latestBill?.customerName || 'Customer',
         isRegular: totalPurchases >= 3,
       },
       stats: {
@@ -84,13 +97,8 @@ export async function GET(request: NextRequest) {
         avgSentiment: avgSentiment || 0,
       },
       history: bills.map((bill) => ({
-        id: bill.id,
-        billNumber: bill.billNumber,
-        billDate: bill.billDate,
-        totalAmount: bill.totalAmount,
+        ...decryptBillFields(bill),
         items: bill.items ? JSON.parse(bill.items) : [],
-        status: bill.status,
-        review: bill.review,
       })),
     });
   } catch (error) {

@@ -281,6 +281,7 @@ OCR_SPACE_API_KEY=
 EMAIL_USER=
 EMAIL_PASSWORD=
 EMAIL_FROM=TrustScore Platform
+DATA_ENCRYPTION_KEY=
 
 HF_MODEL_DIR=
 HF_DATASET_DIR=
@@ -301,6 +302,7 @@ TORCH_INTEROP_THREADS=1
 - `EMAIL_USER`: Gmail address used to send OTP emails
 - `EMAIL_PASSWORD`: Gmail app password, not your regular Gmail password
 - `EMAIL_FROM`: sender name used in OTP emails
+- `DATA_ENCRYPTION_KEY`: secret used for application-level encryption of sensitive personal/contact/OCR data
 - `HF_MODEL_DIR`: optional path to the fine-tuned model directory
 - `HF_DATASET_DIR`: optional path for generated Hugging Face dataset artifacts
 - `TRAIN_EPOCHS`, `TRAIN_BATCH_SIZE`, `EVAL_BATCH_SIZE`, `TRAIN_LEARNING_RATE`: optional training overrides
@@ -370,6 +372,16 @@ Important:
 - the seed script recreates the sample dataset
 - if you want to preserve current data, skip `db:seed`
 
+### 5A. Backfill Encryption For Existing Data
+
+If you already have users, shops, or bills saved before enabling application-level encryption, run:
+
+```bash
+npm run security:backfill-encryption
+```
+
+This will re-save existing sensitive fields in encrypted form and populate hashed lookup fields used by auth and bill ownership checks.
+
 ### 6. Start The AI Service
 
 From the project root:
@@ -417,6 +429,7 @@ npm run lint
 npm run db:generate
 npm run db:push
 npm run db:seed
+npm run security:backfill-encryption
 ```
 
 ## Seed Test Accounts

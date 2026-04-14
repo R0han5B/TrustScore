@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { decryptBillFields, decryptShopFields, decryptUserFields } from '@/lib/data-protection';
 
 export async function GET(
   request: NextRequest,
@@ -58,7 +59,11 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      bill,
+      bill: decryptBillFields({
+        ...bill,
+        shop: decryptShopFields(bill.shop),
+        customer: bill.customer ? decryptUserFields(bill.customer) : bill.customer,
+      }),
     });
   } catch (error) {
     console.error('Get bill error:', error);

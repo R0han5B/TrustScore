@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { generateBillPdfBuffer } from '@/lib/bill-pdf';
+import {
+  decryptBillFields,
+  decryptShopFields,
+  hashEmailForLookup,
+  hashPhoneForLookup,
+  valuesMatchEmail,
+  valuesMatchPhone,
+} from '@/lib/data-protection';
 
 type BillItem = {
   name: string;
@@ -49,12 +57,18 @@ export async function GET(
       );
     }
 
+    const publicBill = decryptBillFields(bill);
+    const publicShop = decryptShopFields(bill.shop);
+
     const hasAccess =
       user.role === 'ADMIN' ||
       bill.shop.ownerId === user.id ||
       bill.customerId === user.id ||
-      (!!user.phone && bill.customerPhone === user.phone) ||
-      bill.customerEmail === user.email;
+      (!!user.phone &&
+        ((bill.customerPhoneHash && bill.customerPhoneHash === hashPhoneForLookup(user.phone)) ||
+          valuesMatchPhone(publicBill.customerPhone, user.phone))) ||
+      ((bill.customerEmailHash && bill.customerEmailHash === hashEmailForLookup(user.email)) ||
+        valuesMatchEmail(publicBill.customerEmail, user.email));
 
     if (!hasAccess) {
       return NextResponse.json(
@@ -67,12 +81,12 @@ export async function GET(
     const pdfBuffer = generateBillPdfBuffer({
       billNumber: bill.billNumber,
       billDate: bill.billDate,
-      customerName: bill.customerName,
-      customerPhone: bill.customerPhone,
-      customerEmail: bill.customerEmail,
+      customerName: publicBill.customerName,
+      customerPhone: publicBill.customerPhone,
+      customerEmail: publicBill.customerEmail,
       items,
       totalAmount: bill.totalAmount,
-      shop: bill.shop,
+      shop: publicShop,
     });
 
     const filename = `${bill.billNumber.replace(/[^A-Za-z0-9-_]/g, '_')}.pdf`;

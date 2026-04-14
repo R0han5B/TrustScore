@@ -7,6 +7,14 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
 import { User, UserRole } from '@prisma/client';
+import {
+  decryptUserFields,
+  encryptValue,
+  hashEmailForLookup,
+  hashOtpForStorage,
+  hashPhoneForLookup,
+  normalizeEmail,
+} from '@/lib/data-protection';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'trust-scoring-platform-secret-key-2024';
 const OTP_EXPIRY_MINUTES = 10;
@@ -66,6 +74,33 @@ export function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+async function findUserByEmail(email: string) {
+  const normalizedEmail = normalizeEmail(email);
+  const emailHash = hashEmailForLookup(normalizedEmail);
+
+  return db.user.findFirst({
+    where: {
+      OR: [
+        ...(emailHash ? [{ emailHash }] : []),
+        { email: normalizedEmail },
+      ],
+    },
+  });
+}
+
+async function findUserByPhone(phone: string) {
+  const phoneHash = hashPhoneForLookup(phone);
+
+  return db.user.findFirst({
+    where: {
+      OR: [
+        ...(phoneHash ? [{ phoneHash }] : []),
+        { phone },
+      ],
+    },
+  });
+}
+
 /**
  * Generate OTP expiry time
  */
@@ -83,23 +118,39 @@ export async function createOrUpdateUserWithOTP(
 ): Promise<{ user: User; otp: string }> {
   const otp = generateOTP();
   const otpExpiresAt = getOTPExpiry();
+  const existingUser = await findUserByEmail(email);
 
-  const user = await db.user.upsert({
-    where: { email },
-    update: {
-      otpCode: otp,
-      otpExpiresAt,
-      ...(phone && { phone }),
-    },
-    create: {
-      email,
-      phone: phone || null,
-      name: name || null,
-      otpCode: otp,
-      otpExpiresAt,
-      role: 'CUSTOMER',
-    },
-  });
+  const encryptedEmail = encryptValue(normalizeEmail(email))!;
+  const encryptedPhone = encryptValue(phone || null);
+  const encryptedName = encryptValue(name || null);
+
+  const user = existingUser
+    ? await db.user.update({
+        where: { id: existingUser.id },
+        data: {
+          email: encryptedEmail,
+          emailHash: hashEmailForLookup(email),
+          otpCode: hashOtpForStorage(otp),
+          otpExpiresAt,
+          ...(phone && {
+            phone: encryptedPhone,
+            phoneHash: hashPhoneForLookup(phone),
+          }),
+          ...(name && { name: encryptedName }),
+        },
+      })
+    : await db.user.create({
+        data: {
+          email: encryptedEmail,
+          emailHash: hashEmailForLookup(email),
+          phone: encryptedPhone,
+          phoneHash: hashPhoneForLookup(phone),
+          name: encryptedName,
+          otpCode: hashOtpForStorage(otp),
+          otpExpiresAt,
+          role: 'CUSTOMER',
+        },
+      });
 
   return { user, otp };
 }
@@ -111,9 +162,7 @@ export async function verifyOTP(
   email: string,
   otpCode: string
 ): Promise<{ success: boolean; user?: User; error?: string }> {
-  const user = await db.user.findUnique({
-    where: { email },
-  });
+  const user = await findUserByEmail(email);
 
   if (!user) {
     return { success: false, error: 'User not found' };
@@ -127,7 +176,9 @@ export async function verifyOTP(
     return { success: false, error: 'OTP has expired. Please request a new OTP.' };
   }
 
-  if (user.otpCode !== otpCode) {
+  const hashedOtp = hashOtpForStorage(otpCode);
+
+  if (user.otpCode !== hashedOtp && user.otpCode !== otpCode) {
     return { success: false, error: 'Invalid OTP code' };
   }
 
@@ -141,7 +192,7 @@ export async function verifyOTP(
     },
   });
 
-  return { success: true, user };
+  return { success: true, user: decryptUserFields(user) };
 }
 
 /**
@@ -171,7 +222,7 @@ export async function getUserFromToken(authHeader: string | null): Promise<AuthU
     },
   });
 
-  return user;
+  return user ? decryptUserFields(user) : null;
 }
 
 /**
@@ -188,11 +239,13 @@ export async function registerUser(
 
   return db.user.create({
     data: {
-      email,
+      email: encryptValue(normalizeEmail(email))!,
+      emailHash: hashEmailForLookup(email),
       passwordHash: hashedPassword,
-      name,
+      name: encryptValue(name),
       role,
-      phone: phone || null,
+      phone: encryptValue(phone || null),
+      phoneHash: hashPhoneForLookup(phone),
       isVerified: true,
     },
   });
@@ -208,9 +261,7 @@ export async function completeVerifiedRegistration(
   role: UserRole = 'CUSTOMER',
   phone?: string
 ): Promise<{ user?: User; error?: string }> {
-  const existingUser = await db.user.findUnique({
-    where: { email },
-  });
+  const existingUser = await findUserByEmail(email);
 
   if (!existingUser) {
     return { error: 'Please verify your email with OTP before registering' };
@@ -229,15 +280,18 @@ export async function completeVerifiedRegistration(
   const user = await db.user.update({
     where: { id: existingUser.id },
     data: {
+      email: encryptValue(normalizeEmail(email))!,
+      emailHash: hashEmailForLookup(email),
       passwordHash: hashedPassword,
-      name,
+      name: encryptValue(name),
       role,
-      phone: phone || existingUser.phone || null,
+      phone: encryptValue(phone || decryptUserFields(existingUser).phone || null),
+      phoneHash: hashPhoneForLookup(phone || decryptUserFields(existingUser).phone || null),
       isVerified: true,
     },
   });
 
-  return { user };
+  return { user: decryptUserFields(user) };
 }
 
 /**
@@ -247,9 +301,7 @@ export async function loginWithEmailPassword(
   email: string,
   password: string
 ): Promise<{ success: boolean; user?: User; token?: string; error?: string }> {
-  const user = await db.user.findUnique({
-    where: { email },
-  });
+  const user = await findUserByEmail(email);
 
   if (!user || !user.passwordHash) {
     return { success: false, error: 'Invalid email or password' };
@@ -263,9 +315,9 @@ export async function loginWithEmailPassword(
 
   const token = generateToken({
     userId: user.id,
-    email: user.email,
+    email: decryptUserFields(user).email,
     role: user.role,
   });
 
-  return { success: true, user, token };
+  return { success: true, user: decryptUserFields(user), token };
 }

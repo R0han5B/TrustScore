@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromToken } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { decryptJson, encryptJson, encryptValue } from '@/lib/data-protection';
 
 const OCR_SPACE_API_URL = 'https://api.ocr.space/parse/image';
 
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest) {
           billDate: existingBill.billDate,
           totalAmount: existingBill.totalAmount,
           status: existingBill.status,
-          ocrData: existingBill.ocrData ? JSON.parse(existingBill.ocrData) : ocrData,
+          ocrData: decryptJson<Record<string, unknown>>(existingBill.ocrData) || ocrData,
         },
         matchedShop: matchedShop
           ? { id: matchedShop.id, name: matchedShop.name }
@@ -164,8 +165,8 @@ export async function POST(request: NextRequest) {
         customerId: user.id,
         billDate,
         totalAmount,
-        imageUrl: dataUri, // store base64; swap with cloud URL (S3/Cloudinary) when ready
-        ocrData: JSON.stringify(ocrData),
+        imageUrl: encryptValue(dataUri), // store encrypted base64; swap with cloud URL when ready
+        ocrData: encryptJson(ocrData),
         status: 'PENDING',
       },
     });

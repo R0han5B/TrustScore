@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { completeVerifiedRegistration, generateToken } from '@/lib/auth';
 import { UserRole } from '@prisma/client';
 import { db } from '@/lib/db';
+import { decryptUserFields, encryptValue, hashEmailForLookup, normalizeEmail } from '@/lib/data-protection';
 import { buildShopGeocodeQuery, geocodeAddress } from '@/lib/geocoding';
 
 export async function POST(request: NextRequest) {
@@ -25,8 +26,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Check current user state for verified-signup flow
-    const existingUser = await db.user.findUnique({
-      where: { email },
+    const existingUser = await db.user.findFirst({
+      where: {
+        OR: [
+          ...(hashEmailForLookup(email) ? [{ emailHash: hashEmailForLookup(email)! }] : []),
+          { email: normalizeEmail(email) },
+        ],
+      },
     });
 
     if (existingUser?.passwordHash) {
@@ -65,6 +71,7 @@ export async function POST(request: NextRequest) {
     }
 
     const user = registration.user;
+    const publicUser = decryptUserFields(user);
 
     // Create shop if shopkeeper
     if (userRole === 'SHOPKEEPER' && shopDetails) {
@@ -88,8 +95,8 @@ export async function POST(request: NextRequest) {
           pincode: shopDetails.pincode,
           latitude: geocodeResult.coordinates?.lat ?? null,
           longitude: geocodeResult.coordinates?.lon ?? null,
-          phone: shopDetails.phone || phone,
-          email: shopDetails.email || email,
+          phone: encryptValue(shopDetails.phone || phone || null),
+          email: encryptValue(shopDetails.email || publicUser.email),
           registrationNo: shopDetails.registrationNo,
           gstNumber: shopDetails.gstNumber,
           ownerId: user.id,
@@ -100,7 +107,7 @@ export async function POST(request: NextRequest) {
     // Generate token
     const token = generateToken({
       userId: user.id,
-      email: user.email,
+      email: publicUser.email,
       role: user.role,
     });
 
@@ -110,10 +117,10 @@ export async function POST(request: NextRequest) {
       token,
       user: {
         id: user.id,
-        email: user.email,
-        name: user.name,
+        email: publicUser.email,
+        name: publicUser.name,
         role: user.role,
-        phone: user.phone,
+        phone: publicUser.phone,
       },
     });
   } catch (error) {

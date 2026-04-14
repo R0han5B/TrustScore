@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getUserFromToken } from '@/lib/auth';
 import { clamp, hybridReviewToTrustScore } from '@/lib/review-scoring';
+import { decryptUserFields, hashEmailForLookup, hashPhoneForLookup } from '@/lib/data-protection';
 
 async function recalculateTrustScore(shopId: string) {
   const reviews = await db.review.findMany({
@@ -70,7 +71,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({
+    const storedUser = await db.user.findUnique({
       where: { id: currentUser.id },
       select: {
         id: true,
@@ -79,12 +80,14 @@ export async function DELETE(request: NextRequest) {
       },
     });
 
-    if (!user) {
+    if (!storedUser) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
       );
     }
+
+    const user = decryptUserFields(storedUser);
 
     const userReviews = await db.review.findMany({
       where: { customerId: user.id },
@@ -95,10 +98,14 @@ export async function DELETE(request: NextRequest) {
 
     const billDeletionClauses = [
       { customerId: user.id },
+      ...(hashEmailForLookup(user.email) ? [{ customerEmailHash: hashEmailForLookup(user.email)! }] : []),
       { customerEmail: user.email },
     ];
 
     if (user.phone) {
+      if (hashPhoneForLookup(user.phone)) {
+        billDeletionClauses.push({ customerPhoneHash: hashPhoneForLookup(user.phone)! });
+      }
       billDeletionClauses.push({ customerPhone: user.phone });
     }
 
