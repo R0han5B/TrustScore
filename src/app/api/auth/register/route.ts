@@ -75,15 +75,26 @@ export async function POST(request: NextRequest) {
 
     // Create shop if shopkeeper
     if (userRole === 'SHOPKEEPER' && shopDetails) {
-      const geocodeResult = await geocodeAddress(
-        buildShopGeocodeQuery({
-          name: shopDetails.name,
-          address: shopDetails.address,
-          city: shopDetails.city,
-          pincode: shopDetails.pincode,
-        }),
-        shopDetails.city
-      );
+      const submittedLatitude =
+        typeof shopDetails.latitude === 'number' && Number.isFinite(shopDetails.latitude)
+          ? shopDetails.latitude
+          : null;
+      const submittedLongitude =
+        typeof shopDetails.longitude === 'number' && Number.isFinite(shopDetails.longitude)
+          ? shopDetails.longitude
+          : null;
+      const geocodeResult =
+        submittedLatitude !== null && submittedLongitude !== null
+          ? { coordinates: { lat: submittedLatitude, lon: submittedLongitude } }
+          : await geocodeAddress(
+              buildShopGeocodeQuery({
+                name: shopDetails.name,
+                address: shopDetails.address,
+                city: shopDetails.city,
+                pincode: shopDetails.pincode,
+              }),
+              shopDetails.city
+            );
 
       await db.shop.create({
         data: {

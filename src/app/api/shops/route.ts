@@ -117,6 +117,8 @@ export async function POST(request: NextRequest) {
       address,
       city,
       pincode,
+      latitude,
+      longitude,
       phone,
       email,
       registrationNo,
@@ -160,10 +162,18 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const geocodeResult = await geocodeAddress(
-      buildShopGeocodeQuery({ name, address, city, pincode }),
-      city
-    );
+    const submittedLatitude =
+      typeof latitude === 'number' && Number.isFinite(latitude) ? latitude : null;
+    const submittedLongitude =
+      typeof longitude === 'number' && Number.isFinite(longitude) ? longitude : null;
+
+    const geocodeResult =
+      submittedLatitude !== null && submittedLongitude !== null
+        ? { coordinates: { lat: submittedLatitude, lon: submittedLongitude } }
+        : await geocodeAddress(
+            buildShopGeocodeQuery({ name, address, city, pincode }),
+            city
+          );
 
     const shopWithCoordinates = geocodeResult.coordinates
       ? await db.shop.update({

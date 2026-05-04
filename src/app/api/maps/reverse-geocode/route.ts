@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { reverseGeocodeCoordinates } from '@/lib/geocoding';
+import { extractStreet, reverseGeocodeCoordinates } from '@/lib/geocoding';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -17,6 +17,10 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
+    displayName: result.displayName,
+    address: result.address,
+    street: extractStreet(result.address ?? undefined),
+    pincode: result.address?.postcode ?? null,
     city: result.city,
     source: result.source,
   });

@@ -18,6 +18,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ShopDiscoveryMap } from '@/components/shop-discovery-map';
+import { LocationPicker } from '@/components/location-picker';
 import {
   Search,
   Upload,
@@ -286,6 +287,8 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
     address: '',
     city: '',
     pincode: '',
+    latitude: null as number | null,
+    longitude: null as number | null,
     phone: '',
     registrationNo: '',
     category: 'OTHER',
@@ -423,6 +426,8 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
       address: '',
       city: '',
       pincode: '',
+      latitude: null,
+      longitude: null,
       phone: '',
       registrationNo: '',
       category: 'OTHER',
@@ -746,11 +751,11 @@ function AuthModal({ open, onClose, onAuth, isLoading, setIsLoading, mode, setMo
                       </div>
                       <div className="col-span-2 space-y-1">
                         <Label className="text-xs">Address</Label>
-                        <Input
-                          placeholder="123 Main St"
-                          value={shopDetails.address}
-                          onChange={(e) => setShopDetails({ ...shopDetails, address: e.target.value })}
-                          className="h-9"
+                        <LocationPicker
+                          id="register-shop-address"
+                          value={shopDetails}
+                          onChange={(nextValue) => setShopDetails((current) => ({ ...current, ...nextValue }))}
+                          placeholder="Search your shop address"
                         />
                       </div>
                       <div className="space-y-1">
@@ -1184,121 +1189,11 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
         </div>
       </section>
 
-      {/* Stats Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="border-0 shadow-md bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-slate-800 text-white flex items-center justify-center">
-                <Store className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{shops.length}</p>
-                <p className="text-xs text-slate-500">Verified Shops</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-md bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20">
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500 text-white flex items-center justify-center">
-                <MessageSquare className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{shops.reduce((acc, s) => acc + s.reviewCount, 0)}</p>
-                <p className="text-xs text-slate-500">Reviews</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-md bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20">
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center">
-                <Shield className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">AI</p>
-                <p className="text-xs text-slate-500">Sentiment Analysis</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-md bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20">
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-500 text-white flex items-center justify-center">
-                <CheckCircle className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">100%</p>
-                <p className="text-xs text-slate-500">Verified Reviews</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Shops Grid */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-10 h-10 animate-spin text-slate-700" />
-        </div>
-      ) : filteredShops.length === 0 ? (
-        <div className="text-center py-20">
-          <Store className="w-16 h-16 mx-auto text-slate-300 mb-4" />
-          <h3 className="text-xl font-medium text-slate-600">No shops found</h3>
-          <p className="text-slate-400">Try adjusting your search criteria</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredShops.map((shop) => (
-            <Card
-              key={shop.id}
-              className="cursor-pointer hover:shadow-xl transition-all duration-300 border-0 shadow-md hover:-translate-y-1"
-              onClick={() => setSelectedShop(shop)}
-            >
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center text-white font-bold text-lg shadow-md">
-                      {shop.name[0]}
-                    </div>
-                    <div>
-                      <CardTitle className="text-lg">{shop.name}</CardTitle>
-                      <CardDescription className="flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
-                        {shop.city}
-                      </CardDescription>
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className="text-xs">{shop.category}</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-slate-500 line-clamp-2 mb-3">{shop.description}</p>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <TrustScoreGauge score={shop.trustScore} size="sm" />
-                    <span className="text-sm text-slate-500">
-                      {shop.reviewCount} review{shop.reviewCount !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-slate-400" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* CTA Section */}
-      <Card className="border-0 shadow-lg bg-gradient-to-r from-slate-800 to-black text-white">
+      <Card className="border-0 bg-gradient-to-r from-slate-800 to-black text-white shadow-lg">
         <CardContent className="pt-6 pb-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
             <div>
-              <h3 className="text-xl font-bold mb-1">Are you a shop owner?</h3>
+              <h3 className="mb-1 text-xl font-bold">Are you a shop owner?</h3>
               <p className="text-white/80">Register your shop and start building trust with customers today!</p>
             </div>
             <Button
@@ -1312,6 +1207,7 @@ function PublicDashboard({ onLoginRequired }: { onLoginRequired: () => void }) {
           </div>
         </CardContent>
       </Card>
+
     </div>
   );
 }
@@ -2465,6 +2361,8 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
     address: '',
     city: '',
     pincode: '',
+    latitude: null as number | null,
+    longitude: null as number | null,
   });
 
   useEffect(() => {
@@ -2479,6 +2377,8 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
             address: shopRes.shop.address || '',
             city: shopRes.shop.city || '',
             pincode: shopRes.shop.pincode || '',
+            latitude: shopRes.shop.latitude ?? null,
+            longitude: shopRes.shop.longitude ?? null,
           });
           setTrustScoreData({
             score: shopRes.shop.trustScore,
@@ -2682,6 +2582,8 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
           address: shopForm.address,
           city: shopForm.city,
           pincode: shopForm.pincode,
+          latitude: shopForm.latitude,
+          longitude: shopForm.longitude,
           category: shop.category,
           phone: shop.phone,
           email: (shop as Shop & { email?: string }).email,
@@ -2781,7 +2683,7 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
                   <DialogHeader>
                     <DialogTitle>Edit Shop Details</DialogTitle>
                     <DialogDescription>
-                      Update your shop name, description, and location details. Coordinates will be refreshed automatically in the backend.
+                      Update your shop name, description, and location details. The saved location will follow the map pin.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
@@ -2804,10 +2706,11 @@ function ShopkeeperDashboard({ token }: { user: User; token: string }) {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="edit-shop-address">Address</Label>
-                      <Input
+                      <LocationPicker
                         id="edit-shop-address"
-                        value={shopForm.address}
-                        onChange={(e) => setShopForm((current) => ({ ...current, address: e.target.value }))}
+                        value={shopForm}
+                        onChange={(nextValue) => setShopForm((current) => ({ ...current, ...nextValue }))}
+                        placeholder="Search your shop address"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">

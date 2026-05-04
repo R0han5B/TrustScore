@@ -127,16 +127,27 @@ export async function PUT(
     const nextAddress = body.address ?? shop.address;
     const nextCity = body.city ?? shop.city;
     const nextPincode = body.pincode ?? shop.pincode;
+    const submittedLatitude =
+      typeof body.latitude === 'number' && Number.isFinite(body.latitude)
+        ? body.latitude
+        : null;
+    const submittedLongitude =
+      typeof body.longitude === 'number' && Number.isFinite(body.longitude)
+        ? body.longitude
+        : null;
 
-    const geocodeResult = await geocodeAddress(
-      buildShopGeocodeQuery({
-        name: nextName,
-        address: nextAddress,
-        city: nextCity,
-        pincode: nextPincode,
-      }),
-      nextCity
-    );
+    const geocodeResult =
+      submittedLatitude !== null && submittedLongitude !== null
+        ? { coordinates: { lat: submittedLatitude, lon: submittedLongitude } }
+        : await geocodeAddress(
+            buildShopGeocodeQuery({
+              name: nextName,
+              address: nextAddress,
+              city: nextCity,
+              pincode: nextPincode,
+            }),
+            nextCity
+          );
 
     const updatedShop = await db.shop.update({
       where: { id },
