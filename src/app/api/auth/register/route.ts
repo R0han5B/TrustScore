@@ -60,6 +60,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (userRole === 'SHOPKEEPER' && !shopDetails?.phone && !phone) {
+      return NextResponse.json(
+        { success: false, error: 'Shop phone is required for shopkeeper registration' },
+        { status: 400 }
+      );
+    }
+
     // Complete verified registration
     const registration = await completeVerifiedRegistration(email, password, name, userRole, phone);
 
@@ -110,7 +117,11 @@ export async function POST(request: NextRequest) {
           email: encryptValue(shopDetails.email || publicUser.email),
           registrationNo: shopDetails.registrationNo,
           gstNumber: shopDetails.gstNumber,
-          ownerId: user.id,
+          owner: {
+            connect: {
+              id: user.id,
+            },
+          },
         },
       });
     }

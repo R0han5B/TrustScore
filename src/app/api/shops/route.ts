@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
       gstNumber,
     } = body;
 
-    if (!name || !address || !city || !pincode || !registrationNo) {
+    if (!name || !address || !city || !pincode || !registrationNo || !phone) {
       return NextResponse.json(
         { success: false, error: 'Missing required fields' },
         { status: 400 }
@@ -158,7 +158,11 @@ export async function POST(request: NextRequest) {
         email: encryptValue(email),
         registrationNo,
         gstNumber,
-        ownerId: user.id,
+        owner: {
+          connect: {
+            id: user.id,
+          },
+        },
       },
     });
 
